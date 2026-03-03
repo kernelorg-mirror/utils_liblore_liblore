@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "liblore"
+version = "0.1.0"
+description = "Shared library for public-inbox / lore.kernel.org access"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-2.0-or-later"
+license-files = ["LICENSES/*.txt"]
+authors = [
+    { name = "Konstantin Ryabitsev", email = "konstantin@linuxfoundation.org" }
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Communications :: Email",
+    "Topic :: Communications :: Email :: Mailing List Servers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "requests>=2.31",
+]
+
+[project.urls]
+Homepage = "https://git.kernel.org/pub/scm/utils/liblore/liblore.git"
+Repository = "https://git.kernel.org/pub/scm/utils/liblore/liblore.git"
+"Bug Reports" = "mailto:tools@kernel.org"
+
+[dependency-groups]
+dev = [
+    "build",
+    "mypy",
+    "pytest",
+    "ruff",
+    "types-requests",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.mypy]
+strict = true
+
+[tool.ruff]
+target-version = "py311"
