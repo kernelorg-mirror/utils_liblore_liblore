@@ -194,7 +194,7 @@ class TestGetThreadByMsgid:
 
         node.get_thread_by_msgid('first@example.com')
         call_url = mock_session.post.call_args[0][0]
-        assert 'msgid' in call_url
+        assert 'mid' in call_url
         assert 'first%40example.com' in call_url or 'first@example.com' in call_url
 
     def test_since_uses_d_prefix(self, sample_mbox: bytes) -> None:

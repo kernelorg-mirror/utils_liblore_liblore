@@ -136,7 +136,7 @@ class LoreNode:
 
         Raises :class:`LookupError` when no messages match.
         """
-        query = f'msgid:{msgid}'
+        query = f'mid:{msgid}'
         if since:
             query += f' d:{since}..'
         msgs = self.get_thread_by_query(query)
