@@ -6,14 +6,12 @@ import pytest
 
 from email.message import EmailMessage
 
-from liblore import emlpolicy
 from liblore.utils import (
     clean_header,
     format_addrs,
     get_msg_as_bytes,
     minimize_thread,
     wrap_header,
-    MINIMIZE_KEEP_HEADERS,
 )
 
 
