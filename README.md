@@ -84,6 +84,33 @@ with LoreNode() as node:
     )
 ```
 
+**`node.get_thread_updates_since(msgid, since, *, strict=True, sort=False)`**
+
+Check whether a thread has new messages since a given point in time. This is
+handy for polling use cases where you want to know if anything new has arrived.
+
+- `since` -- a `datetime` object. Converted to a UTC epoch timestamp
+  internally and matched against the server-set `Received` header (`rt:`
+  prefix), which is more reliable than the client-set `Date` header.
+- `strict` (default `True`) -- filter results to only messages belonging to
+  the thread rooted at `msgid`.
+- `sort` -- sort the returned messages by their `Received` header timestamp.
+
+Returns a `list[EmailMessage]`. Returns an empty list (rather than raising)
+when there are no updates.
+
+```python
+from datetime import datetime, timedelta, timezone
+
+with LoreNode() as node:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    updates = node.get_thread_updates_since(
+        "20250101-example@kernel.org", cutoff,
+    )
+    if updates:
+        print(f"{len(updates)} new message(s)")
+```
+
 **`node.get_thread_by_query(query)`**
 
 Run a search query and return a deduplicated `list[EmailMessage]`. The query
@@ -192,13 +219,16 @@ get_thread_by_query                        ->  split + dedupe -> list[EmailMessa
         |
 get_thread_by_msgid                        ->  strict + sort  -> list[EmailMessage]
         |
+get_thread_updates_since                   ->  poll for new   -> list[EmailMessage]
+        |
 batch_get_thread_by_msgid / batch_get_...  ->  rate-limited loop -> list[list[EmailMessage]]
 ```
 
 You can tap into whichever layer suits your needs. Need raw bytes for
 archiving? Use the `get_mbox_*` methods. Need parsed messages with
 deduplication? Use `get_thread_by_query`. Want the full convenience of
-strict filtering and date sorting? Use `get_thread_by_msgid`.
+strict filtering and date sorting? Use `get_thread_by_msgid`. Need to
+poll for new messages? Use `get_thread_updates_since`.
 
 ### Utility Functions
 
