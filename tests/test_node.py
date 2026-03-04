@@ -175,13 +175,13 @@ class TestGetThreadByMsgid:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.content = gzip.compress(sample_mbox)
-        mock_session.post.return_value = mock_resp
+        mock_session.get.return_value = mock_resp
         node.set_requests_session(mock_session)
 
         msgs = node.get_thread_by_msgid('first@example.com')
         assert len(msgs) >= 1
-        # Should always go through POST (query path)
-        mock_session.post.assert_called_once()
+        # Without since, fetches full thread via GET /{msgid}/t.mbox.gz
+        mock_session.get.assert_called_once()
 
     def test_query_contains_msgid(self, sample_mbox: bytes) -> None:
         node = LoreNode('https://lore.kernel.org/all')
@@ -189,15 +189,15 @@ class TestGetThreadByMsgid:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.content = gzip.compress(sample_mbox)
-        mock_session.post.return_value = mock_resp
+        mock_session.get.return_value = mock_resp
         node.set_requests_session(mock_session)
 
         node.get_thread_by_msgid('first@example.com')
-        call_url = mock_session.post.call_args[0][0]
-        assert 'mid' in call_url
+        call_url = mock_session.get.call_args[0][0]
         assert 'first%40example.com' in call_url or 'first@example.com' in call_url
+        assert call_url.endswith('/t.mbox.gz')
 
-    def test_since_uses_d_prefix(self, sample_mbox: bytes) -> None:
+    def test_since_uses_dt_prefix(self, sample_mbox: bytes) -> None:
         node = LoreNode('https://lore.kernel.org/all')
         mock_session = MagicMock()
         mock_resp = MagicMock()
@@ -208,15 +208,16 @@ class TestGetThreadByMsgid:
 
         node.get_thread_by_msgid('first@example.com', since='20240101')
         call_url = mock_session.post.call_args[0][0]
-        assert 'd%3A20240101' in call_url or 'd:20240101' in call_url
+        assert 'dt%3A20240101' in call_url or 'dt:20240101' in call_url
+        assert 'first%40example.com' in call_url or 'first@example.com' in call_url
 
-    def test_raises_on_empty(self, sample_mbox: bytes) -> None:
+    def test_raises_on_empty(self) -> None:
         node = LoreNode('https://lore.kernel.org/all')
         mock_session = MagicMock()
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.content = gzip.compress(sample_mbox)
-        mock_session.post.return_value = mock_resp
+        mock_resp.content = gzip.compress(b'')
+        mock_session.get.return_value = mock_resp
         node.set_requests_session(mock_session)
 
         with pytest.raises(LookupError):
@@ -228,7 +229,7 @@ class TestGetThreadByMsgid:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.content = gzip.compress(sample_mbox)
-        mock_session.post.return_value = mock_resp
+        mock_session.get.return_value = mock_resp
         node.set_requests_session(mock_session)
 
         msgs = node.get_thread_by_msgid('first@example.com', sort=True)

@@ -104,7 +104,7 @@ class LoreNode:
         query_url = self._url + '/?x=m&q=' + urllib.parse.quote_plus(query)
         logger.debug('query=%s', query_url)
         session = self._get_session()
-        resp = session.post(query_url, data='')
+        resp = session.post(query_url, data='x=m')
         if resp.status_code != 200:
             raise RemoteError('Server returned an error: %s' % resp.status_code)
         t_mbox = gzip.decompress(resp.content)
@@ -125,9 +125,15 @@ class LoreNode:
     ) -> list[EmailMessage]:
         """Fetch a thread from the public-inbox server.
 
-        Queries for ``msgid:{msgid}``.  When *since* is given (a date
-        string like ``20240115`` or ``2.weeks.ago``),
-        ``d:{since}..`` is appended.
+        When *since* is given (a ``YYYYMMDDHHMMSS`` date string), only
+        thread messages with a ``Date:`` header after that timestamp are
+        returned.  This uses the per-message search endpoint
+        (``/{msgid}/?x=m&q=dt:{since}..``) which scopes the query to
+        the thread identified by *msgid* and filters individual messages
+        by date.
+
+        Without *since*, the full thread mbox is fetched via
+        ``/{msgid}/t.mbox.gz``.
 
         When *strict* is ``True`` (default), the results are filtered
         to only messages belonging to the thread rooted at *msgid*.
@@ -136,10 +142,35 @@ class LoreNode:
 
         Raises :class:`LookupError` when no messages match.
         """
-        query = f'mid:{msgid}'
         if since:
-            query += f' d:{since}..'
-        msgs = self.get_thread_by_query(query)
+            # Use the per-message search endpoint: the /{msgid}/ path
+            # scopes the query to the thread, and dt: filters individual
+            # messages by Date header.  POST with empty body so that
+            # thread expansion is NOT triggered — we only want messages
+            # matching the dt: range.
+            qmsgid = urllib.parse.quote_plus(msgid)
+            query = urllib.parse.quote_plus(f'dt:{since}..')
+            search_url = f'{self._url}/{qmsgid}/?x=m&q={query}'
+            logger.debug('Fetching thread updates from: %s', search_url)
+            session = self._get_session()
+            resp = session.post(search_url, data='')
+            if resp.status_code != 200:
+                raise LookupError(
+                    'No messages found for msgid=%s since=%s' % (msgid, since)
+                )
+            t_mbox = gzip.decompress(resp.content)
+            resp.close()
+            if not t_mbox:
+                raise LookupError(
+                    'No messages found for msgid=%s since=%s' % (msgid, since)
+                )
+            msgs = split_and_dedupe(t_mbox)
+        else:
+            # Full thread: GET /{msgid}/t.mbox.gz
+            t_mbox = self.get_mbox_by_msgid(msgid)
+            if not t_mbox:
+                raise LookupError('No messages found for msgid=%s' % msgid)
+            msgs = split_and_dedupe(t_mbox)
 
         if strict:
             strict_msgs = get_strict_thread(msgs, msgid)
