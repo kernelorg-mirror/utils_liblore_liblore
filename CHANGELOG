@@ -3,6 +3,24 @@ CHANGELOG
 
 v0.3.0-dev (unreleased)
 --------------------
+- Add email serialization utilities ported from b4/bugspray:
+  format_addrs(), wrap_header(), get_msg_as_bytes(). These replace
+  Python's buggy as_bytes() with battle-tested RFC 2047 header
+  encoding and line wrapping.
+
+- Add minimize_thread() for creating compact thread views by
+  stripping excessive quoting, multi-level quotes, and non-essential
+  headers. Messages containing diffs/diffstats are preserved as-is.
+  Accepts an optional keep_headers parameter for customizing which
+  headers to retain. Compliant email signatures are split off before
+  processing so trailing quoted blocks before a signature are
+  correctly recognised and dropped.
+
+- Add reduce_quote_context option to minimize_thread() for more
+  aggressive quote reduction: long quoted blocks preceding a reply
+  are trimmed to just the last paragraph, with earlier content
+  replaced by a "> [... skip NN lines ...]" marker. Only kicks in
+  when more than 5 lines would be skipped.
 
 v0.2.0 (2026-03-03)
 --------------------

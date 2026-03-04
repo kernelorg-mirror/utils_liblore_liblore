@@ -286,6 +286,30 @@ body = msg_get_payload(msg, strip_quoted=True, strip_signature=True)
 recipients = msg_get_recipients(msg)
 ```
 
+#### Email Serialization
+
+These functions replace Python's buggy `as_bytes()` with battle-tested
+serialization that correctly handles RFC 2047 header encoding, line wrapping,
+and non-ASCII display names.
+
+```python
+from liblore.utils import format_addrs, wrap_header, get_msg_as_bytes
+
+# Format (name, email) pairs into an RFC 5322 address string
+formatted = format_addrs([
+    ("", "foo@example.com"),
+    ("Foo Bar", "bar@example.com"),
+])
+# -> 'foo@example.com, Foo Bar <bar@example.com>'
+
+# Wrap and RFC 2047-encode a header for SMTP
+hdr_bytes = wrap_header(("Subject", "Hello world"))
+
+# Serialize a full message to bytes with proper encoding
+msg_bytes = get_msg_as_bytes(msg)            # \n line endings (dry-run)
+msg_bytes = get_msg_as_bytes(msg, nl="\r\n") # \r\n for SMTP
+```
+
 #### Sorting and Threading
 
 ```python
@@ -300,6 +324,32 @@ thread = get_strict_thread(msgs, "20250101-example@kernel.org")
 # Break the thread at msgid, ignoring its parent references
 thread = get_strict_thread(msgs, msgid, noparent=True)
 ```
+
+#### Thread Minimization
+
+```python
+from liblore.utils import minimize_thread
+
+# Strip excessive quoting and non-essential headers for compact display
+minimized = minimize_thread(msgs)
+
+# Customize which headers to keep
+minimized = minimize_thread(msgs, keep_headers=("From", "Subject", "Date"))
+
+# Aggressively reduce long quotes to just the last paragraph
+minimized = minimize_thread(msgs, reduce_quote_context=True)
+```
+
+`minimize_thread()` creates lightweight copies of each message: it keeps only
+essential headers (From, To, Cc, Subject, Date, Message-ID, Reply-To,
+In-Reply-To by default), strips multi-level quotes and trailing quoted blocks,
+and drops messages that become empty after processing. Messages containing
+diffs or diffstats are preserved as-is.
+
+When `reduce_quote_context=True`, long quoted blocks preceding a reply are
+trimmed to just the last paragraph, with earlier content replaced by a
+`> [... skip NN lines ...]` marker.  This only applies when more than 5 lines
+would be skipped.
 
 #### Mbox Splitting
 

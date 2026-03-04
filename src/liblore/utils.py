@@ -3,13 +3,16 @@
 """Message parsing, email utilities, threading, and mbox splitting."""
 from __future__ import annotations
 
+from collections.abc import Sequence
 import datetime
 import email.header
 import email.parser
+import email.quoprimime
 import email.utils
 import fnmatch
 import logging
 import re
+import textwrap
 import urllib.parse
 
 from email.message import EmailMessage
@@ -165,6 +168,120 @@ def msg_get_payload(
 
 
 
+# Adapted from email._parseaddr — RFC 5322 specials that require quoting
+_QSPECIALS = re.compile(r'[()<>@,:;.\"\[\]]')
+
+
+def format_addrs(pairs: list[tuple[str, str]], clean: bool = True) -> str:
+    """Format ``(name, email)`` pairs into an RFC 5322 address string.
+
+    Works around CPython issue #100900 where ``formataddr`` mis-quotes
+    display names containing RFC 5322 special characters.  When *clean*
+    is ``True`` (the default), RFC 2047 encoded names are decoded first
+    via :func:`clean_header`.
+    """
+    addrs: list[str] = []
+    for name, addr in pairs:
+        if not name or name == addr:
+            addrs.append(addr)
+            continue
+        if clean:
+            name = clean_header(name)
+        # Work around https://github.com/python/cpython/issues/100900
+        if not name.startswith('=?') and not name.startswith('"') and _QSPECIALS.search(name):
+            addrs.append(f'"{email.utils.quote(name)}" <{addr}>')
+            continue
+        if name.isascii():
+            addrs.append(email.utils.formataddr((name, addr)))
+        else:
+            # Avoid email.utils.formataddr re-encoding unicode to RFC 2047
+            addrs.append(f'{name} <{addr}>')
+    return ', '.join(addrs)
+
+
+def wrap_header(hdr: tuple[str, str], width: int = 75, nl: str = '\n') -> bytes:
+    """Wrap and RFC 2047-encode a single header for outbound email.
+
+    Address headers (To, Cc, From, X-Original-From) are parsed and each
+    address is encoded individually.  Non-address headers are
+    word-wrapped (ASCII) or RFC 2047 quoted-printable encoded (non-ASCII).
+
+    *nl* controls the line ending: ``'\\n'`` for dry-run display,
+    ``'\\r\\n'`` for SMTP transmission.
+    """
+    hname, hval = hdr
+    _parts: list[str] = []
+    if hname.lower() in ('to', 'cc', 'from', 'x-original-from'):
+        _parts.append(f'{hname}: ')
+        first = True
+        for addr in email.utils.getaddresses([hval]):
+            if not addr[0].isascii():
+                enc_name = email.quoprimime.header_encode(
+                    addr[0].encode(), charset='utf-8')
+                qp = format_addrs([(enc_name, addr[1])], clean=False)
+            else:
+                qp = format_addrs([addr], clean=False)
+            if first:
+                _parts[-1] += qp
+                first = False
+                continue
+            if len(_parts[-1] + ', ' + qp) > width:
+                _parts[-1] += ', '
+                _parts.append(qp)
+                continue
+            _parts[-1] += ', ' + qp
+    else:
+        hdata = f'{hname}: {hval}'
+        if hval.isascii():
+            if len(hdata) <= width:
+                return hdata.encode()
+            # Trick: replace ': ' with ':_' so textwrap doesn't break there
+            hdata = hdata.replace(': ', ':_', 1)
+            wrapped = textwrap.wrap(hdata, break_long_words=False,
+                                    break_on_hyphens=False,
+                                    subsequent_indent=' ', width=width)
+            return nl.join(wrapped).replace(':_', ': ', 1).encode()
+
+        # Non-ASCII: encode as RFC 2047 quoted-printable
+        qp = f'{hname}: ' + email.quoprimime.header_encode(
+            hval.encode(), charset='utf-8')
+        if len(qp) <= width:
+            return qp.encode()
+
+        while len(qp) > width:
+            wrapat = width - 2
+            if len(_parts):
+                wrapat -= 1
+            # Don't break in the middle of a =XX escape sequence
+            while '=' in qp[wrapat - 2:wrapat]:
+                wrapat -= 1
+            _parts.append(qp[:wrapat] + '?=')
+            qp = '=?utf-8?q?' + qp[wrapat:]
+        _parts.append(qp)
+    return f'{nl} '.join(_parts).encode()
+
+
+def get_msg_as_bytes(msg: EmailMessage, nl: str = '\n') -> bytes:
+    """Serialize a message with proper header encoding for SMTP.
+
+    Uses :func:`wrap_header` for RFC 2047 encoding and line wrapping
+    instead of Python's buggy ``as_bytes()``.
+
+    *nl* controls the line ending: ``'\\n'`` for dry-run display,
+    ``'\\r\\n'`` for SMTP transmission.
+    """
+    bdata = b''
+    for hname, hval in msg.items():
+        bdata += wrap_header((hname, str(hval)), nl=nl) + nl.encode()
+    bdata += nl.encode()
+    payload = msg.get_payload(decode=True)
+    if not isinstance(payload, bytes):
+        payload = str(msg.get_payload() or '').encode('utf-8', errors='replace')
+    for bline in payload.split(b'\n'):
+        bdata += re.sub(rb'[\r\n]*$', b'', bline) + nl.encode()
+    return bdata
+
+
 def msg_get_recipients(msg: EmailMessage) -> set[str]:
     """Return the set of lowercased email addresses from To, Cc, and From."""
     pairs: list[tuple[str, str]] = []
@@ -305,6 +422,155 @@ def get_strict_thread(
         )
 
     return strict
+
+
+# =====================================================================
+# Thread minimization
+# =====================================================================
+
+# Detect diff and diffstat content — messages containing these are
+# preserved verbatim by minimize_thread().
+DIFF_RE = re.compile(r'^diff\s', re.M)
+DIFFSTAT_RE = re.compile(r'^\s*\d+ file.*changed', re.M)
+
+# Default set of headers to keep when minimizing messages.
+MINIMIZE_KEEP_HEADERS: tuple[str, ...] = (
+    'From', 'To', 'Cc', 'Subject', 'Date',
+    'Message-ID', 'Reply-To', 'In-Reply-To',
+)
+
+
+def minimize_thread(
+    msgs: list[EmailMessage],
+    keep_headers: Sequence[str] | None = None,
+    reduce_quote_context: bool = False,
+) -> list[EmailMessage]:
+    """Reduce thread messages to essential headers and clean up excessive quoting.
+
+    Creates lightweight copies of each message, keeping only the headers
+    listed in *keep_headers* (defaults to :data:`MINIMIZE_KEEP_HEADERS`).
+
+    For non-patch messages the body is processed to remove:
+    - Multi-level quotes (``>>`` and deeper)
+    - Empty quote-only lines (bare ``>``)
+    - Trailing quoted blocks at the bottom of the message
+
+    When *reduce_quote_context* is ``True``, quoted blocks that precede
+    a reply are further reduced to just the last paragraph, with
+    earlier paragraphs replaced by a ``> [... skip NN lines ...]``
+    marker.  This only kicks in when more than 5 lines would be
+    skipped, so short quotes are left untouched.
+
+    Compliant email signatures (``-- `` marker) are split off before
+    quote processing and re-appended afterwards, so that a trailing
+    quoted block followed only by a signature is correctly recognised
+    as a bottom quote and dropped.
+
+    Messages containing diffs or diffstats are preserved as-is.
+    Messages that become empty after minimization are dropped.
+    """
+    if keep_headers is None:
+        keep_headers = MINIMIZE_KEEP_HEADERS
+
+    mmsgs: list[EmailMessage] = []
+    for msg in msgs:
+        mmsg = EmailMessage()
+        for hdr in keep_headers:
+            val = clean_header(msg[hdr])
+            if val:
+                mmsg[hdr] = val
+
+        body = msg_get_payload(msg, strip_signature=False)
+
+        if not re.search(r'^>', body, re.M) or DIFF_RE.search(body) or DIFFSTAT_RE.search(body):
+            mmsg.set_payload(body, charset='utf-8')
+            mmsgs.append(mmsg)
+            continue
+
+        # Split off the signature before quote processing so trailing
+        # quoted blocks before the sig are recognised as bottom quotes.
+        sig = ''
+        sig_parts = body.rsplit('\n-- \n', maxsplit=1)
+        if len(sig_parts) == 2:
+            body = sig_parts[0]
+            sig = '\n-- \n' + sig_parts[1]
+
+        # Split lines into alternating quoted / unquoted chunks
+        chunks: list[tuple[bool, list[str]]] = []
+        chunk: list[str] = []
+        current: bool | None = None
+        for line in body.rstrip().splitlines():
+            quoted = line.startswith('>')
+            if current is None:
+                current = quoted
+            if current == quoted:
+                if quoted and re.search(r'^>\s*>', line):
+                    # Strip multi-level quotes
+                    continue
+                if quoted and not chunk and line.strip() == '>':
+                    # Strip leading empty quote lines
+                    continue
+                chunk.append(line)
+                continue
+
+            # Flush previous chunk, trimming trailing empty quote lines
+            if current:
+                while chunk and chunk[-1].strip() == '>':
+                    chunk.pop(-1)
+            if chunk:
+                chunks.append((current, chunk))
+            chunk = []
+            if not (quoted and line.strip() == '>'):
+                chunk.append(line)
+            current = quoted
+
+        if current is None:
+            current = False
+
+        # Don't append trailing quoted chunks
+        if chunk and not current:
+            chunks.append((current, chunk))
+
+        # Reduce long quoted blocks to just the last paragraph
+        if reduce_quote_context:
+            for idx, (is_quoted, qchunk) in enumerate(chunks):
+                if not is_quoted:
+                    continue
+                # Only reduce quoted chunks followed by an unquoted reply
+                if idx + 1 >= len(chunks) or chunks[idx + 1][0]:
+                    continue
+                # Find the last paragraph boundary (empty quote line)
+                last_break = -1
+                for li, line in enumerate(qchunk):
+                    if line.strip() in ('>', ''):
+                        last_break = li
+                if last_break <= 0:
+                    continue
+                skipped = last_break
+                if skipped <= 5:
+                    continue
+                last_para = qchunk[last_break + 1:]
+                chunks[idx] = (True, [
+                    f'> [... skip {skipped} lines ...]',
+                    '>',
+                ] + last_para)
+
+        parts: list[str] = []
+        for _quoted, chunk in chunks:
+            parts.append('\n'.join(chunk))
+        body = '\n'.join(parts).strip() + '\n'
+
+        if not body.strip():
+            continue
+
+        # Re-append the signature
+        if sig:
+            body = body.rstrip('\n') + sig
+
+        mmsg.set_payload(body, charset='utf-8')
+        mmsgs.append(mmsg)
+
+    return mmsgs
 
 
 # =====================================================================
