@@ -6,7 +6,7 @@ import email.policy
 
 from email.message import EmailMessage
 
-__version__ = '0.3.0-dev'
+__version__ = '0.3.0'
 
 # Email policy used for parsing and serialising messages
 emlpolicy = email.policy.EmailPolicy(

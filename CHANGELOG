@@ -1,7 +1,7 @@
 CHANGELOG
 =========
 
-v0.3.0-dev (unreleased)
+v0.3.0 (2026-03-04)
 --------------------
 - Add email serialization utilities ported from b4/bugspray:
   format_addrs(), wrap_header(), get_msg_as_bytes(). These replace
