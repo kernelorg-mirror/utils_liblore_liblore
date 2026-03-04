@@ -9,6 +9,7 @@ email messages from mailing list archives.
 
 - Python 3.11 or newer
 - `requests` >= 2.31
+- `authheaders` >= 0.15 (optional, for DKIM/DMARC/ARC verification)
 
 ## Installation
 
@@ -16,6 +17,12 @@ Install from PyPI:
 
 ```shell
 pip install liblore
+```
+
+To include optional email authentication support (DKIM, DMARC, ARC):
+
+```shell
+pip install liblore[auth]
 ```
 
 Or install from source:
@@ -206,6 +213,28 @@ public-inbox server. Raises `RemoteError` if it does not.
 
 **`node.close()`** -- close the HTTP session. Called automatically when
 using `LoreNode` as a context manager.
+
+#### Message Authentication
+
+LoreNode can optionally verify DKIM signatures, DMARC alignment, and ARC
+chains on every message it retrieves. This requires the `authheaders` package
+(install with `pip install liblore[auth]`).
+
+```python
+with LoreNode(add_auth_headers=True) as node:
+    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+    for msg in msgs:
+        print(msg["Authentication-Results"])
+        # liblore; dkim=pass header.d=kernel.org; ...
+```
+
+When enabled, each returned `EmailMessage` gets an `Authentication-Results`
+header added by the [authheaders](https://pypi.org/project/authheaders/)
+library. SPF is not checked because archived messages don't carry the SMTP
+transaction info (client IP, MAIL FROM, HELO) that SPF requires.
+
+If `add_auth_headers=True` is set but `authheaders` is not installed, a
+`LibloreError` is raised immediately on construction.
 
 ### How the API Layers Fit Together
 

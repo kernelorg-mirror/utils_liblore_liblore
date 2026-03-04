@@ -6,6 +6,7 @@ from __future__ import annotations
 import gzip
 import logging
 import time
+import types
 import urllib.parse
 from datetime import datetime, timezone
 
@@ -13,7 +14,7 @@ import requests
 
 from email.message import EmailMessage
 
-from liblore import RemoteError
+from liblore import LibloreError, RemoteError
 from liblore.utils import (
     get_strict_thread,
     sort_msgs_by_received,
@@ -34,11 +35,26 @@ class LoreNode:
             msgs = node.get_thread_by_msgid('test@example.com')
     """
 
-    def __init__(self, url: str = 'https://lore.kernel.org/all') -> None:
+    def __init__(
+        self,
+        url: str = 'https://lore.kernel.org/all',
+        *,
+        add_auth_headers: bool = False,
+    ) -> None:
         self._url = url.rstrip('/')
         self._session: requests.Session | None = None
         self._owns_session = False
         self._user_agent: str = f'liblore/{__import__("liblore").__version__}'
+        self._authheaders: types.ModuleType | None = None
+        if add_auth_headers:
+            try:
+                import authheaders
+                self._authheaders = authheaders
+            except ImportError:
+                raise LibloreError(
+                    'authheaders library is required for add_auth_headers. '
+                    'Install with: pip install liblore[auth]'
+                )
 
     # -----------------------------------------------------------------
     # Session management
@@ -83,6 +99,27 @@ class LoreNode:
 
     def __exit__(self, *_args: object) -> None:
         self.close()
+
+    # -----------------------------------------------------------------
+    # Authentication
+    # -----------------------------------------------------------------
+
+    def _authenticate_msgs(self, msgs: list[EmailMessage]) -> None:
+        """Add Authentication-Results headers via authheaders."""
+        if self._authheaders is None:
+            return
+        for msg in msgs:
+            msg_bytes = msg.as_bytes()
+            auth_result = self._authheaders.authenticate_message(
+                msg_bytes, 'liblore',
+                dkim=True, dmarc=True, arc=True, spf=False,
+            )
+            if auth_result:
+                # authheaders returns the full header line, so strip
+                # the name prefix before adding to the message.
+                msg['Authentication-Results'] = auth_result.removeprefix(
+                    'Authentication-Results: '
+                )
 
     # -----------------------------------------------------------------
     # Primary API — raw mbox
@@ -167,6 +204,7 @@ class LoreNode:
         if sort:
             msgs = sort_msgs_by_received(msgs)
 
+        self._authenticate_msgs(msgs)
         return msgs
 
     def _fetch_thread_since(
@@ -241,6 +279,7 @@ class LoreNode:
         if sort and msgs:
             msgs = sort_msgs_by_received(msgs)
 
+        self._authenticate_msgs(msgs)
         return msgs
 
     def get_thread_by_query(
@@ -251,7 +290,9 @@ class LoreNode:
         t_mbox = self.get_mbox_by_query(query)
         if not t_mbox:
             raise LookupError('No results for query: %s' % query)
-        return split_and_dedupe(t_mbox)
+        msgs = split_and_dedupe(t_mbox)
+        self._authenticate_msgs(msgs)
+        return msgs
 
     def get_message_by_msgid(self, msgid: str) -> bytes:
         """Fetch a single raw email message by message ID."""

@@ -16,6 +16,10 @@ v0.3.0-dev (unreleased)
   processing so trailing quoted blocks before a signature are
   correctly recognised and dropped.
 
+- Add optional message authentication (DKIM, DMARC, ARC) via the
+  authheaders library. Enable with LoreNode(add_auth_headers=True).
+  Install the optional dependency with: pip install liblore[auth].
+
 - Add reduce_quote_context option to minimize_thread() for more
   aggressive quote reduction: long quoted blocks preceding a reply
   are trimmed to just the last paragraph, with earlier content
