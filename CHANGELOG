@@ -1,0 +1,33 @@
+CHANGELOG
+=========
+
+v0.2.0 (unreleased)
+--------------------
+- Fix thread update fetching to use the per-message search endpoint
+  (/{msgid}/?x=m&q=dt:{since}..) instead of a global query with
+  mid:{msgid}. This scopes the search to the correct thread and
+  filters by Date header (dt:) instead of commit date (d:).
+
+- Fix get_mbox_by_query() to POST 'x=m' as request body, ensuring
+  the server returns mbox format.
+
+- Add get_thread_updates_since() convenience method for checking
+  whether a thread has new messages. Accepts a datetime object and
+  returns an empty list when there are no updates, making it easy
+  to poll for changes. Uses the rt: (Received header) search prefix
+  with epoch timestamps for reliable server-side date filtering.
+
+- Refactor get_thread_by_msgid() to use GET /{msgid}/t.mbox.gz for
+  full thread fetches (no since parameter), avoiding unnecessary
+  query overhead.
+
+v0.1.0 (2025-08-15)
+--------------------
+- Initial release.
+- LoreNode class for interacting with public-inbox servers.
+- Thread fetching by message ID and by search query.
+- Single message fetching by message ID.
+- Batch operations with rate limiting.
+- Strict thread filtering and sort-by-received support.
+- Configurable User-Agent and external session injection.
+- Server validation via HEAD request to help endpoint.

@@ -7,6 +7,7 @@ import gzip
 import logging
 import time
 import urllib.parse
+from datetime import datetime, timezone
 
 import requests
 
@@ -143,28 +144,11 @@ class LoreNode:
         Raises :class:`LookupError` when no messages match.
         """
         if since:
-            # Use the per-message search endpoint: the /{msgid}/ path
-            # scopes the query to the thread, and dt: filters individual
-            # messages by Date header.  POST with empty body so that
-            # thread expansion is NOT triggered — we only want messages
-            # matching the dt: range.
-            qmsgid = urllib.parse.quote_plus(msgid)
-            query = urllib.parse.quote_plus(f'dt:{since}..')
-            search_url = f'{self._url}/{qmsgid}/?x=m&q={query}'
-            logger.debug('Fetching thread updates from: %s', search_url)
-            session = self._get_session()
-            resp = session.post(search_url, data='')
-            if resp.status_code != 200:
+            msgs = self._fetch_thread_since(msgid, f'dt:{since}..')
+            if not msgs:
                 raise LookupError(
                     'No messages found for msgid=%s since=%s' % (msgid, since)
                 )
-            t_mbox = gzip.decompress(resp.content)
-            resp.close()
-            if not t_mbox:
-                raise LookupError(
-                    'No messages found for msgid=%s since=%s' % (msgid, since)
-                )
-            msgs = split_and_dedupe(t_mbox)
         else:
             # Full thread: GET /{msgid}/t.mbox.gz
             t_mbox = self.get_mbox_by_msgid(msgid)
@@ -181,6 +165,80 @@ class LoreNode:
             msgs = strict_msgs
 
         if sort:
+            msgs = sort_msgs_by_received(msgs)
+
+        return msgs
+
+    def _fetch_thread_since(
+        self,
+        msgid: str,
+        query_fragment: str,
+    ) -> list[EmailMessage]:
+        """Fetch thread messages matching a date-range query fragment.
+
+        *query_fragment* is a ready-to-use search term such as
+        ``dt:20240101..`` or ``rt:1704067200..``.
+
+        Uses the per-message search endpoint: the ``/{msgid}/`` path
+        scopes the query to the thread.  POSTs with an empty body so
+        that thread expansion is NOT triggered — only messages matching
+        the range are returned.
+
+        Returns an empty list when the server finds no matches.
+        """
+        qmsgid = urllib.parse.quote_plus(msgid)
+        query = urllib.parse.quote_plus(query_fragment)
+        search_url = f'{self._url}/{qmsgid}/?x=m&q={query}'
+        logger.debug('Fetching thread updates from: %s', search_url)
+        session = self._get_session()
+        resp = session.post(search_url, data='')
+        if resp.status_code != 200:
+            return []
+        t_mbox = gzip.decompress(resp.content)
+        resp.close()
+        if not t_mbox:
+            return []
+        return split_and_dedupe(t_mbox)
+
+    def get_thread_updates_since(
+        self,
+        msgid: str,
+        since: datetime,
+        *,
+        strict: bool = True,
+        sort: bool = False,
+    ) -> list[EmailMessage]:
+        """Check a thread for messages newer than *since*.
+
+        Uses the ``rt:`` (Received-date) search prefix, which filters
+        by the server-set ``Received:`` header rather than the
+        client-set ``Date:`` header, making it more reliable.
+        Accepts a :class:`~datetime.datetime` (converted to a UTC
+        epoch timestamp internally) and returns an empty list when
+        there are no updates, making it easy to poll::
+
+            from datetime import datetime, timedelta, timezone
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            updates = node.get_thread_updates_since(msgid, cutoff)
+            if updates:
+                print(f'{len(updates)} new message(s)')
+
+        When *strict* is ``True`` (default), results are filtered to
+        only messages belonging to the thread rooted at *msgid*.
+
+        When *sort* is ``True``, messages are sorted by Received date.
+        """
+        epoch = int(since.astimezone(timezone.utc).timestamp())
+        msgs = self._fetch_thread_since(msgid, f'rt:{epoch}..')
+
+        if strict and msgs:
+            strict_msgs = get_strict_thread(msgs, msgid)
+            if isinstance(strict_msgs, list) and len(strict_msgs):
+                msgs = strict_msgs
+            else:
+                return []
+
+        if sort and msgs:
             msgs = sort_msgs_by_received(msgs)
 
         return msgs

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from unittest.mock import MagicMock, call, patch
 
@@ -234,6 +235,82 @@ class TestGetThreadByMsgid:
 
         msgs = node.get_thread_by_msgid('first@example.com', sort=True)
         assert len(msgs) >= 1
+
+
+# =====================================================================
+# get_thread_updates_since
+# =====================================================================
+
+class TestGetThreadUpdatesSince:
+    def test_returns_messages(self, sample_mbox: bytes) -> None:
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = gzip.compress(sample_mbox)
+        mock_session.post.return_value = mock_resp
+        node.set_requests_session(mock_session)
+
+        since = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        msgs = node.get_thread_updates_since('first@example.com', since)
+        assert len(msgs) >= 1
+        mock_session.post.assert_called_once()
+
+    def test_empty_returns_empty_list(self) -> None:
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = gzip.compress(b'')
+        mock_session.post.return_value = mock_resp
+        node.set_requests_session(mock_session)
+
+        since = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        msgs = node.get_thread_updates_since('first@example.com', since)
+        assert msgs == []
+
+    def test_converts_datetime_to_rt_epoch(self, sample_mbox: bytes) -> None:
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = gzip.compress(sample_mbox)
+        mock_session.post.return_value = mock_resp
+        node.set_requests_session(mock_session)
+
+        since = datetime(2024, 3, 15, 8, 30, 45, tzinfo=timezone.utc)
+        epoch = int(since.timestamp())  # 1710491445
+        node.get_thread_updates_since('first@example.com', since)
+        call_url = mock_session.post.call_args[0][0]
+        assert f'rt%3A{epoch}' in call_url or f'rt:{epoch}' in call_url
+        assert 'first%40example.com' in call_url or 'first@example.com' in call_url
+
+    def test_with_sort(self, sample_mbox: bytes) -> None:
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = gzip.compress(sample_mbox)
+        mock_session.post.return_value = mock_resp
+        node.set_requests_session(mock_session)
+
+        since = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        msgs = node.get_thread_updates_since(
+            'first@example.com', since, sort=True,
+        )
+        assert len(msgs) >= 1
+
+    def test_server_error_returns_empty_list(self) -> None:
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_session.post.return_value = mock_resp
+        node.set_requests_session(mock_session)
+
+        since = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        msgs = node.get_thread_updates_since('first@example.com', since)
+        assert msgs == []
 
 
 # =====================================================================
