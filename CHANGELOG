@@ -1,7 +1,10 @@
 CHANGELOG
 =========
 
-v0.2.0 (unreleased)
+v0.3.0-dev (unreleased)
+--------------------
+
+v0.2.0 (2026-03-03)
 --------------------
 - Fix thread update fetching to use the per-message search endpoint
   (/{msgid}/?x=m&q=dt:{since}..) instead of a global query with
