@@ -10,6 +10,7 @@ from liblore.utils import (
     get_clean_msgid,
     get_preferred_duplicate,
     split_and_dedupe,
+    split_and_dedupe_as_bytes,
     split_mbox,
     split_mbox_as_bytes,
 )
@@ -184,6 +185,95 @@ class TestSplitMboxAsBytes:
             reparsed = parse_message(raw)
             assert reparsed['Message-Id'] == msg['Message-Id']
             assert reparsed['Subject'] == msg['Subject']
+
+
+class TestSplitAndDedupeAsBytes:
+    def test_deduplicates(self, sample_mbox: bytes) -> None:
+        doubled = sample_mbox + sample_mbox
+        chunks = split_and_dedupe_as_bytes(doubled)
+        assert len(chunks) == 2
+        assert all(isinstance(c, bytes) for c in chunks)
+
+    def test_preserves_order(self, sample_mbox: bytes) -> None:
+        chunks = split_and_dedupe_as_bytes(sample_mbox)
+        assert b'Message-Id: <first@example.com>' in chunks[0]
+        assert b'Message-Id: <second@example.com>' in chunks[1]
+
+    def test_drops_no_msgid(self) -> None:
+        raw = (
+            b'From test@example.com Mon Jan  1 00:00:00 2024\n'
+            b'From: test@example.com\n'
+            b'Subject: No msgid\n'
+            b'\n'
+            b'Body.\n'
+            b'\n'
+        )
+        assert split_and_dedupe_as_bytes(raw) == []
+
+    def test_prefers_better_source(self) -> None:
+        mailman = textwrap.dedent("""\
+            From test@example.com Mon Jan  1 00:00:00 2024
+            From: test@example.com
+            Subject: Test
+            Message-Id: <dup@example.com>
+            List-Id: <list.vger.kernel.org>
+
+            Mailman copy with footer.
+
+        """).encode()
+        feeds = textwrap.dedent("""\
+            From test@example.com Mon Jan  1 00:00:00 2024
+            From: test@example.com
+            Subject: Test
+            Message-Id: <dup@example.com>
+            List-Id: <list.feeds.kernel.org>
+
+            Clean feeds copy.
+
+        """).encode()
+        chunks = split_and_dedupe_as_bytes(mailman + feeds)
+        assert len(chunks) == 1
+        assert b'Clean feeds copy' in chunks[0]
+
+        chunks = split_and_dedupe_as_bytes(feeds + mailman)
+        assert len(chunks) == 1
+        assert b'Clean feeds copy' in chunks[0]
+
+    def test_empty_preference_keeps_first(self) -> None:
+        mailman = textwrap.dedent("""\
+            From test@example.com Mon Jan  1 00:00:00 2024
+            From: test@example.com
+            Subject: Test
+            Message-Id: <dup@example.com>
+            List-Id: <list.vger.kernel.org>
+
+            First copy.
+
+        """).encode()
+        feeds = textwrap.dedent("""\
+            From test@example.com Mon Jan  1 00:00:00 2024
+            From: test@example.com
+            Subject: Test
+            Message-Id: <dup@example.com>
+            List-Id: <list.feeds.kernel.org>
+
+            Second copy.
+
+        """).encode()
+        chunks = split_and_dedupe_as_bytes(mailman + feeds, listid_preference=[])
+        assert len(chunks) == 1
+        assert b'First copy' in chunks[0]
+
+    def test_roundtrip_with_split_and_dedupe(self, sample_mbox: bytes) -> None:
+        """Parsing the bytes output should match split_and_dedupe."""
+        from liblore.utils import parse_message
+        doubled = sample_mbox + sample_mbox
+        chunks = split_and_dedupe_as_bytes(doubled)
+        msgs = split_and_dedupe(doubled)
+        assert len(chunks) == len(msgs)
+        for raw, msg in zip(chunks, msgs):
+            reparsed = parse_message(raw)
+            assert reparsed['Message-Id'] == msg['Message-Id']
 
 
 class TestSplitAndDedupe:

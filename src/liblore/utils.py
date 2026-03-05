@@ -581,6 +581,42 @@ def _is_from_line(line: bytes) -> bool:
     return len(line) >= 20 and _FROM_RE.match(line) is not None
 
 
+def _get_raw_header(raw: bytes, name: str) -> str | None:
+    """Extract a header value from raw message bytes without full parsing.
+
+    Performs a case-insensitive scan of the header block (up to the
+    first blank line).  Handles folded headers (continuation lines
+    starting with whitespace).
+    """
+    prefix = name.lower().encode() + b':'
+    hdr_end = raw.find(b'\n\n')
+    header_block = raw[:hdr_end] if hdr_end >= 0 else raw
+
+    value: bytes | None = None
+    for line in header_block.split(b'\n'):
+        if value is not None and line and line[:1] in (b' ', b'\t'):
+            value += b' ' + line.strip()
+            continue
+        if value is not None:
+            break
+        if line.lower().startswith(prefix):
+            value = line[len(prefix):].strip()
+
+    if value is not None:
+        return value.decode('ascii', errors='replace')
+    return None
+
+
+def _clean_msgid_raw(raw: bytes, header: str = 'message-id') -> str | None:
+    """Extract a clean message ID (without angle brackets) from raw bytes."""
+    val = _get_raw_header(raw, header)
+    if val:
+        match = re.search(r'<([^>]+)>', val)
+        if match:
+            return match.group(1)
+    return None
+
+
 def split_mbox_as_bytes(mbox_bytes: bytes) -> list[bytes]:
     """Split mboxrd bytes into a list of raw message byte strings.
 
@@ -644,6 +680,24 @@ DEFAULT_LISTID_PREFERENCE: list[str] = [
 ]
 
 
+def _listid_preference_index(
+    listid: str | None, listid_preference: list[str],
+) -> int:
+    """Return the preference index for a List-Id value.
+
+    Lower is better.  Falls back to the ``*`` wildcard position, or
+    one past the end if no wildcard is present.
+    """
+    if listid:
+        for idx, pattern in enumerate(listid_preference):
+            if fnmatch.fnmatch(listid, pattern):
+                return idx
+    try:
+        return listid_preference.index('*')
+    except ValueError:
+        return len(listid_preference)
+
+
 def get_preferred_duplicate(
     msg1: EmailMessage,
     msg2: EmailMessage,
@@ -663,20 +717,10 @@ def get_preferred_duplicate(
     if listid_preference is None:
         listid_preference = DEFAULT_LISTID_PREFERENCE
 
-    def _preference_index(msg: EmailMessage) -> int:
-        listid = get_clean_msgid(msg, 'List-Id')
-        if listid:
-            for idx, pattern in enumerate(listid_preference):
-                if fnmatch.fnmatch(listid, pattern):
-                    return idx
-        # No List-Id or no pattern matched — use the wildcard position
-        try:
-            return listid_preference.index('*')
-        except ValueError:
-            return len(listid_preference)
-
-    idx1 = _preference_index(msg1)
-    idx2 = _preference_index(msg2)
+    idx1 = _listid_preference_index(
+        get_clean_msgid(msg1, 'List-Id'), listid_preference)
+    idx2 = _listid_preference_index(
+        get_clean_msgid(msg2, 'List-Id'), listid_preference)
     if idx1 <= idx2:
         logger.debug('Picked duplicate from preferred source: %s',
                       get_clean_msgid(msg1, 'List-Id'))
@@ -684,6 +728,56 @@ def get_preferred_duplicate(
     logger.debug('Picked duplicate from preferred source: %s',
                   get_clean_msgid(msg2, 'List-Id'))
     return msg2
+
+
+def split_and_dedupe_as_bytes(
+    mbox_bytes: bytes,
+    listid_preference: list[str] | None = None,
+) -> list[bytes]:
+    """Split mboxrd bytes and deduplicate by Message-ID, returning raw bytes.
+
+    Like :func:`split_and_dedupe` but avoids parsing messages into
+    :class:`~email.message.EmailMessage` objects.  Header inspection
+    is done directly on raw bytes.
+
+    When duplicate Message-IDs are found, the copy from the
+    preferred source is kept (based on ``List-Id`` header matching
+    against *listid_preference* patterns).  Pass an empty list to
+    disable preference logic and keep the first occurrence.
+
+    Messages without a Message-ID are silently dropped.
+    """
+    if listid_preference is None:
+        listid_preference = DEFAULT_LISTID_PREFERENCE
+    use_preference = len(listid_preference) > 0
+
+    chunks = split_mbox_as_bytes(mbox_bytes)
+    deduped: dict[str, bytes] = {}
+    for raw in chunks:
+        msgid = _clean_msgid_raw(raw)
+        if msgid is None:
+            logger.debug(
+                'No message-id found, ignoring %s',
+                _get_raw_header(raw, 'subject') or '(no subject)',
+            )
+            continue
+        if msgid in deduped:
+            if use_preference:
+                idx_old = _listid_preference_index(
+                    _clean_msgid_raw(deduped[msgid], 'list-id'),
+                    listid_preference,
+                )
+                idx_new = _listid_preference_index(
+                    _clean_msgid_raw(raw, 'list-id'),
+                    listid_preference,
+                )
+                if idx_new < idx_old:
+                    deduped[msgid] = raw
+            else:
+                logger.debug('Dropping duplicate message-id: %s', msgid)
+            continue
+        deduped[msgid] = raw
+    return list(deduped.values())
 
 
 def split_and_dedupe(
@@ -699,30 +793,10 @@ def split_and_dedupe(
 
     Messages without a Message-ID are silently dropped.
     """
-    if listid_preference is None:
-        listid_preference = DEFAULT_LISTID_PREFERENCE
-    use_preference = len(listid_preference) > 0
-
-    msgs = split_mbox(mbox_bytes)
-    deduped: dict[str, EmailMessage] = {}
-    for msg in msgs:
-        msgid = get_clean_msgid(msg)
-        if msgid is None:
-            logger.debug(
-                'No message-id found, ignoring %s',
-                msg.get('Subject', '(no subject)'),
-            )
-            continue
-        if msgid in deduped:
-            if use_preference:
-                deduped[msgid] = get_preferred_duplicate(
-                    deduped[msgid], msg, listid_preference,
-                )
-            else:
-                logger.debug('Dropping duplicate message-id: %s', msgid)
-            continue
-        deduped[msgid] = msg
-    return list(deduped.values())
+    return [
+        parse_message(raw)
+        for raw in split_and_dedupe_as_bytes(mbox_bytes, listid_preference)
+    ]
 
 
 # =====================================================================
