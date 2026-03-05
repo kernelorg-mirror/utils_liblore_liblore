@@ -1,6 +1,17 @@
 CHANGELOG
 =========
 
+v0.4.0 (2026-03-05)
+--------------------
+- Add split_mbox_as_bytes() and split_and_dedupe_as_bytes() for
+  working with raw message bytes without invoking the email parser.
+  The regular split_mbox() and split_and_dedupe() now wrap these
+  functions, so the splitting logic is shared.
+
+- The bytes-level deduplication extracts Message-ID and List-Id
+  headers directly from raw bytes using lightweight line scanning,
+  avoiding the cost of full message parsing.
+
 v0.3.1 (2026-03-04)
 --------------------
 - Lower minimum Python version from 3.11 to 3.9. The codebase already

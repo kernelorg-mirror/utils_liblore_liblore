@@ -7,7 +7,7 @@ email messages from mailing list archives.
 
 ## Requirements
 
-- Python 3.11 or newer
+- Python 3.9 or newer
 - `requests` >= 2.31
 - `authheaders` >= 0.15 (optional, for DKIM/DMARC/ARC verification)
 
@@ -391,6 +391,24 @@ msgs = split_mbox(mbox_bytes)
 # Split and deduplicate by Message-ID (first occurrence wins)
 msgs = split_and_dedupe(mbox_bytes)
 ```
+
+When you need raw message bytes without the cost of parsing, use the
+`_as_bytes` variants:
+
+```python
+from liblore.utils import split_mbox_as_bytes, split_and_dedupe_as_bytes
+
+# Split mboxrd bytes into a list of raw message byte strings
+chunks = split_mbox_as_bytes(mbox_bytes)
+
+# Split, deduplicate, and return raw bytes (no email parsing)
+chunks = split_and_dedupe_as_bytes(mbox_bytes)
+```
+
+The `_as_bytes` functions perform mboxrd unescaping and (for dedupe)
+Message-ID/List-Id extraction directly on raw bytes, so they skip the
+email parser entirely. The regular `split_mbox` and `split_and_dedupe`
+are thin wrappers that parse the results.
 
 #### URL Helpers
 
