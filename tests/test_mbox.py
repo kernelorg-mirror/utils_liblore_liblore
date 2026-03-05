@@ -11,6 +11,7 @@ from liblore.utils import (
     get_preferred_duplicate,
     split_and_dedupe,
     split_mbox,
+    split_mbox_as_bytes,
 )
 
 from liblore import emlpolicy
@@ -133,6 +134,56 @@ class TestSplitMbox:
         assert '>From escaped in first.' not in body1
         assert '>From double-escaped in second.' in body2
         assert '>>From double-escaped in second.' not in body2
+
+
+class TestSplitMboxAsBytes:
+    def test_splits_two_messages(self, sample_mbox: bytes) -> None:
+        chunks = split_mbox_as_bytes(sample_mbox)
+        assert len(chunks) == 2
+        assert all(isinstance(c, bytes) for c in chunks)
+
+    def test_empty_mbox(self) -> None:
+        assert split_mbox_as_bytes(b'') == []
+
+    def test_from_line_stripped(self, sample_mbox: bytes) -> None:
+        """The 'From ' separator must not appear in the returned bytes."""
+        for chunk in split_mbox_as_bytes(sample_mbox):
+            for line in chunk.split(b'\n'):
+                if line:
+                    assert not line.startswith(b'From ')
+
+    def test_headers_preserved(self, sample_mbox: bytes) -> None:
+        chunks = split_mbox_as_bytes(sample_mbox)
+        assert b'Subject: First message' in chunks[0]
+        assert b'Subject: Second message' in chunks[1]
+
+    def test_mboxrd_unescaping(self) -> None:
+        raw = textwrap.dedent("""\
+            From sender@example.com Mon Jan  1 00:00:00 2024
+            From: sender@example.com
+            Subject: Test
+            Message-Id: <bytes-esc@example.com>
+
+            >From someone
+            >>From deeper
+        """).encode()
+        chunks = split_mbox_as_bytes(raw)
+        assert len(chunks) == 1
+        assert b'From someone\n' in chunks[0]
+        assert b'>From deeper\n' in chunks[0]
+        # No double-escaped lines should remain
+        assert b'>>From' not in chunks[0]
+
+    def test_roundtrip_with_split_mbox(self, sample_mbox: bytes) -> None:
+        """split_mbox_as_bytes + parse_message should match split_mbox."""
+        from liblore.utils import parse_message
+        raw_chunks = split_mbox_as_bytes(sample_mbox)
+        parsed = split_mbox(sample_mbox)
+        assert len(raw_chunks) == len(parsed)
+        for raw, msg in zip(raw_chunks, parsed):
+            reparsed = parse_message(raw)
+            assert reparsed['Message-Id'] == msg['Message-Id']
+            assert reparsed['Subject'] == msg['Subject']
 
 
 class TestSplitAndDedupe:

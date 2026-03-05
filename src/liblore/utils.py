@@ -581,8 +581,8 @@ def _is_from_line(line: bytes) -> bool:
     return len(line) >= 20 and _FROM_RE.match(line) is not None
 
 
-def split_mbox(mbox_bytes: bytes) -> list[EmailMessage]:
-    """Split mboxrd bytes into a list of parsed EmailMessage objects.
+def split_mbox_as_bytes(mbox_bytes: bytes) -> list[bytes]:
+    """Split mboxrd bytes into a list of raw message byte strings.
 
     Handles the mboxrd variant used by public-inbox: for every body
     line that matches ``>+From ``, one leading ``>`` is stripped.
@@ -590,7 +590,7 @@ def split_mbox(mbox_bytes: bytes) -> list[EmailMessage]:
     if not mbox_bytes:
         return []
 
-    msgs: list[EmailMessage] = []
+    msgs: list[bytes] = []
     current: list[bytes] = []
     in_header = False
 
@@ -600,7 +600,7 @@ def split_mbox(mbox_bytes: bytes) -> list[EmailMessage]:
         if _is_from_line(line):
             # Flush the previous message
             if current:
-                msgs.append(parse_message(b''.join(current)))
+                msgs.append(b''.join(current))
                 current = []
             in_header = True
             continue
@@ -619,9 +619,18 @@ def split_mbox(mbox_bytes: bytes) -> list[EmailMessage]:
 
     # Flush the last message
     if current:
-        msgs.append(parse_message(b''.join(current)))
+        msgs.append(b''.join(current))
 
     return msgs
+
+
+def split_mbox(mbox_bytes: bytes) -> list[EmailMessage]:
+    """Split mboxrd bytes into a list of parsed EmailMessage objects.
+
+    Handles the mboxrd variant used by public-inbox: for every body
+    line that matches ``>+From ``, one leading ``>`` is stripped.
+    """
+    return [parse_message(raw) for raw in split_mbox_as_bytes(mbox_bytes)]
 
 
 # Default List-Id preference order.  Sources listed first are less
