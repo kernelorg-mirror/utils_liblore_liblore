@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import logging
+import os
 import time
 import types
 import urllib.parse
@@ -40,11 +42,17 @@ class LoreNode:
         url: str = 'https://lore.kernel.org/all',
         *,
         add_auth_headers: bool = False,
+        cache_dir: str | None = None,
+        cache_ttl: int = 600,
     ) -> None:
         self._url = url.rstrip('/')
         self._session: requests.Session | None = None
         self._owns_session = False
         self._user_agent: str = f'liblore/{__import__("liblore").__version__}'
+        self._cache_dir = cache_dir
+        self._cache_ttl = cache_ttl
+        if cache_dir is not None:
+            os.makedirs(cache_dir, exist_ok=True)
         self._authheaders: types.ModuleType | None = None
         if add_auth_headers:
             try:
@@ -100,6 +108,74 @@ class LoreNode:
     def __exit__(self, *_args: object) -> None:
         self.close()
 
+    @property
+    def url(self) -> str:
+        """The base URL of this public-inbox endpoint."""
+        return self._url
+
+    @property
+    def hostname(self) -> str:
+        """The hostname extracted from the URL, for logging and display."""
+        return urllib.parse.urlparse(self._url).hostname or self._url
+
+    # -----------------------------------------------------------------
+    # Cache
+    # -----------------------------------------------------------------
+
+    def _cache_key(self, namespace: str, *parts: str) -> str:
+        """Build a hex cache key from a namespace and variable parts."""
+        canonical = '\0'.join([self._url, namespace] + list(parts))
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
+    def _cache_read(self, key: str) -> bytes | None:
+        """Return cached bytes if fresh, or None."""
+        if self._cache_dir is None:
+            return None
+        path = os.path.join(self._cache_dir, f'{key}.lore.cache')
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            return None
+        age = int(time.time() - st.st_mtime)
+        if age > self._cache_ttl:
+            logger.debug('Cache expired (%ds > %ds): %s', age, self._cache_ttl, key[:12])
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            return None
+        logger.debug('Cache hit (%ds old): %s', age, key[:12])
+        with open(path, 'rb') as f:
+            return f.read()
+
+    def _cache_write(self, key: str, data: bytes) -> None:
+        """Write data to cache. Errors are logged but never raised."""
+        if self._cache_dir is None:
+            return
+        path = os.path.join(self._cache_dir, f'{key}.lore.cache')
+        tmp_path = path + '.tmp'
+        try:
+            with open(tmp_path, 'wb') as f:
+                f.write(data)
+            os.replace(tmp_path, path)
+        except OSError:
+            logger.debug('Failed to write cache file: %s', path)
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def clear_cache(self) -> None:
+        """Remove all cache files from *cache_dir*."""
+        if self._cache_dir is None:
+            return
+        for entry in os.listdir(self._cache_dir):
+            if entry.endswith('.lore.cache'):
+                try:
+                    os.unlink(os.path.join(self._cache_dir, entry))
+                except OSError:
+                    pass
+
     # -----------------------------------------------------------------
     # Authentication
     # -----------------------------------------------------------------
@@ -125,8 +201,14 @@ class LoreNode:
     # Primary API — raw mbox
     # -----------------------------------------------------------------
 
-    def get_mbox_by_msgid(self, msgid: str) -> bytes:
+    def get_mbox_by_msgid(self, msgid: str, *, nocache: bool = False) -> bytes:
         """Fetch a thread mbox by message ID and return the raw bytes."""
+        key = self._cache_key('mbox_by_msgid', msgid)
+        if not nocache:
+            cached = self._cache_read(key)
+            if cached is not None:
+                return cached
+
         mbox_url = f'{self._url}/{urllib.parse.quote_plus(msgid)}/t.mbox.gz'
         logger.debug('Fetching mbox from: %s', mbox_url)
         session = self._get_session()
@@ -135,6 +217,8 @@ class LoreNode:
             raise RemoteError('Server returned an error: %s' % resp.status_code)
         t_mbox = gzip.decompress(resp.content)
         resp.close()
+
+        self._cache_write(key, t_mbox)
         return t_mbox
 
     def get_mbox_by_query(
@@ -142,6 +226,7 @@ class LoreNode:
         query: str,
         *,
         full_threads: bool = False,
+        nocache: bool = False,
     ) -> bytes:
         """POST a search query and return the raw mbox bytes.
 
@@ -149,6 +234,12 @@ class LoreNode:
         include the full thread for every matching message (public-inbox
         ``t=1`` parameter).
         """
+        key = self._cache_key('mbox_by_query', query, str(full_threads))
+        if not nocache:
+            cached = self._cache_read(key)
+            if cached is not None:
+                return cached
+
         t_param = '&t=1' if full_threads else ''
         query_url = self._url + '/?x=m' + t_param + '&q=' + urllib.parse.quote_plus(query)
         logger.debug('query=%s', query_url)
@@ -158,6 +249,8 @@ class LoreNode:
             raise RemoteError('Server returned an error: %s' % resp.status_code)
         t_mbox = gzip.decompress(resp.content)
         resp.close()
+
+        self._cache_write(key, t_mbox)
         return t_mbox
 
     # -----------------------------------------------------------------
@@ -311,17 +404,26 @@ class LoreNode:
         self._authenticate_msgs(msgs)
         return msgs
 
-    def get_message_by_msgid(self, msgid: str) -> bytes:
+    def get_message_by_msgid(self, msgid: str, *, nocache: bool = False) -> bytes:
         """Fetch a single raw email message by message ID."""
+        key = self._cache_key('message_by_msgid', msgid)
+        if not nocache:
+            cached = self._cache_read(key)
+            if cached is not None:
+                return cached
+
         raw_url = f'{self._url}/{urllib.parse.quote_plus(msgid)}/raw'
         logger.debug('Fetching message from: %s', raw_url)
         try:
             session = self._get_session()
             response = session.get(raw_url)
             response.raise_for_status()
-            return response.content
+            data = response.content
         except Exception as ex:
             raise RemoteError(f'Failed to fetch message from {raw_url}: {ex}') from ex
+
+        self._cache_write(key, data)
+        return data
 
     # -----------------------------------------------------------------
     # Batch API

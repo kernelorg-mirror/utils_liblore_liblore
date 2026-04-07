@@ -62,6 +62,31 @@ from liblore import LoreNode
 node = LoreNode(url="https://lore.kernel.org/all")
 ```
 
+#### Caching
+
+LoreNode can optionally cache raw mbox bytes on disk. Pass `cache_dir` to
+enable it:
+
+```python
+with LoreNode(cache_dir="/tmp/liblore-cache", cache_ttl=600) as node:
+    # First call fetches from the network and writes a cache file
+    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+    # Second call reads from cache (if within TTL)
+    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+```
+
+- `cache_dir` -- directory for cache files (`None` to disable, the default)
+- `cache_ttl` -- time-to-live in seconds (default 600 = 10 minutes)
+
+Caching is applied to `get_mbox_by_msgid`, `get_mbox_by_query`, and
+`get_message_by_msgid`. Polling methods (`get_thread_updates_since`) are
+intentionally not cached. TTL is checked on every read, so stale data is
+never returned -- even in long-running processes.
+
+Pass `nocache=True` to any cached method to bypass the cache for that call
+(the response is still written back to refresh the entry). Call
+`node.clear_cache()` to remove all cached entries.
+
 #### Fetching Threads
 
 **`node.get_thread_by_msgid(msgid, *, strict=True, sort=False, since=None)`**
@@ -182,11 +207,12 @@ These methods return raw mbox bytes rather than parsed messages. They are
 useful when you need the unprocessed data, or when you want to feed the
 output into your own parser.
 
-**`node.get_mbox_by_msgid(msgid)`** -- fetch a thread's mbox by message ID.
+**`node.get_mbox_by_msgid(msgid, *, nocache=False)`** -- fetch a thread's mbox
+by message ID.
 
-**`node.get_mbox_by_query(query, *, full_threads=False)`** -- run a search
-query and return the matching mbox. Pass `full_threads=True` to expand results
-to include full threads.
+**`node.get_mbox_by_query(query, *, full_threads=False, nocache=False)`** --
+run a search query and return the matching mbox. Pass `full_threads=True` to
+expand results to include full threads.
 
 ```python
 with LoreNode() as node:
@@ -197,8 +223,8 @@ with LoreNode() as node:
 
 #### Single Messages
 
-**`node.get_message_by_msgid(msgid)`** -- fetch a single raw message (bytes)
-by its message ID. Useful when you need exactly one message rather than an
+**`node.get_message_by_msgid(msgid, *, nocache=False)`** -- fetch a single raw
+message (bytes) by its message ID. Useful when you need exactly one message rather than an
 entire thread.
 
 #### Session Configuration

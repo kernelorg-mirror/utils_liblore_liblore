@@ -3,6 +3,18 @@ CHANGELOG
 
 v0.5.0 (unreleased)
 --------------------
+- Add optional filesystem caching to LoreNode via new cache_dir and
+  cache_ttl constructor parameters. When cache_dir is set, raw mbox
+  bytes from get_mbox_by_msgid(), get_mbox_by_query(), and
+  get_message_by_msgid() are cached on disk with per-request TTL
+  validation. Stale entries are cleaned up on read. Polling methods
+  (get_thread_updates_since, _fetch_thread_since) are intentionally
+  not cached. Pass nocache=True to any cached method to bypass the
+  cache for a single call. Add clear_cache() for bulk invalidation.
+
+- Add read-only url property to LoreNode for accessing the configured
+  endpoint URL.
+
 - Add full_threads parameter to get_mbox_by_query(),
   get_thread_by_query(), and batch_get_thread_by_query(). When set to
   True, the server expands results to include the full thread for
