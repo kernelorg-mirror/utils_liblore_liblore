@@ -137,9 +137,20 @@ class LoreNode:
         resp.close()
         return t_mbox
 
-    def get_mbox_by_query(self, query: str) -> bytes:
-        """POST a search query and return the raw mbox bytes."""
-        query_url = self._url + '/?x=m&q=' + urllib.parse.quote_plus(query)
+    def get_mbox_by_query(
+        self,
+        query: str,
+        *,
+        full_threads: bool = False,
+    ) -> bytes:
+        """POST a search query and return the raw mbox bytes.
+
+        When *full_threads* is ``True``, the server expands results to
+        include the full thread for every matching message (public-inbox
+        ``t=1`` parameter).
+        """
+        t_param = '&t=1' if full_threads else ''
+        query_url = self._url + '/?x=m' + t_param + '&q=' + urllib.parse.quote_plus(query)
         logger.debug('query=%s', query_url)
         session = self._get_session()
         resp = session.post(query_url, data='x=m')
@@ -285,9 +296,15 @@ class LoreNode:
     def get_thread_by_query(
         self,
         query: str,
+        *,
+        full_threads: bool = False,
     ) -> list[EmailMessage]:
-        """POST a search query and return deduplicated messages."""
-        t_mbox = self.get_mbox_by_query(query)
+        """POST a search query and return deduplicated messages.
+
+        When *full_threads* is ``True``, the server expands results to
+        include the full thread for every matching message.
+        """
+        t_mbox = self.get_mbox_by_query(query, full_threads=full_threads)
         if not t_mbox:
             raise LookupError('No results for query: %s' % query)
         msgs = split_and_dedupe(t_mbox)
@@ -337,11 +354,16 @@ class LoreNode:
     def batch_get_thread_by_query(
         self,
         queries: list[str],
+        *,
+        full_threads: bool = False,
     ) -> list[list[EmailMessage]]:
         """Run multiple queries with rate limiting.
 
         Calls :meth:`get_thread_by_query` for each query with a
         100 ms cooldown between requests (no sleep before the first).
+
+        When *full_threads* is ``True``, the server expands results to
+        include the full thread for every matching message.
 
         Returns a list of results in the same order as the input.
         """
@@ -349,7 +371,9 @@ class LoreNode:
         for i, query in enumerate(queries):
             if i > 0:
                 time.sleep(0.1)
-            results.append(self.get_thread_by_query(query))
+            results.append(
+                self.get_thread_by_query(query, full_threads=full_threads)
+            )
         return results
 
     def validate(self) -> None:

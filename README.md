@@ -118,7 +118,7 @@ with LoreNode() as node:
         print(f"{len(updates)} new message(s)")
 ```
 
-**`node.get_thread_by_query(query)`**
+**`node.get_thread_by_query(query, *, full_threads=False)`**
 
 Run a search query and return a deduplicated `list[EmailMessage]`. The query
 uses public-inbox's
@@ -126,10 +126,18 @@ uses public-inbox's
 prefixes like `msgid:`, `s:` (subject), `f:` (from), `d:` (date range), and
 more.
 
+When `full_threads` is `True`, the server expands results to include the
+full thread for every matching message. This is useful when searching by
+patch-id or change-id and you need the complete surrounding thread, not just
+the matching messages.
+
 ```python
 with LoreNode() as node:
     # Find all messages from a sender in the last month
     msgs = node.get_thread_by_query("f:alice@example.com d:last.month..")
+
+    # Search by patch-id and fetch the full threads
+    msgs = node.get_thread_by_query("patchid:abc123", full_threads=True)
 ```
 
 #### Batch Fetching
@@ -155,7 +163,7 @@ with LoreNode() as node:
         print(f"Thread with {len(thread)} messages")
 ```
 
-**`node.batch_get_thread_by_query(queries)`**
+**`node.batch_get_thread_by_query(queries, *, full_threads=False)`**
 
 Run multiple search queries. Same pattern -- calls `get_thread_by_query()` per
 query with a 100 ms cooldown. Returns a `list[list[EmailMessage]]`.
@@ -176,8 +184,9 @@ output into your own parser.
 
 **`node.get_mbox_by_msgid(msgid)`** -- fetch a thread's mbox by message ID.
 
-**`node.get_mbox_by_query(query)`** -- run a search query and return the
-matching mbox.
+**`node.get_mbox_by_query(query, *, full_threads=False)`** -- run a search
+query and return the matching mbox. Pass `full_threads=True` to expand results
+to include full threads.
 
 ```python
 with LoreNode() as node:

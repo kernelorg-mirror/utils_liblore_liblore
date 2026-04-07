@@ -1,6 +1,15 @@
 CHANGELOG
 =========
 
+v0.5.0 (unreleased)
+--------------------
+- Add full_threads parameter to get_mbox_by_query(),
+  get_thread_by_query(), and batch_get_thread_by_query(). When set to
+  True, the server expands results to include the full thread for
+  every matching message (public-inbox t=1 parameter). This is needed
+  by callers like b4 that search by patch-id or change-id and expect
+  the complete surrounding thread, not just the matching messages.
+
 v0.4.0 (2026-03-05)
 --------------------
 - Add split_mbox_as_bytes() and split_and_dedupe_as_bytes() for

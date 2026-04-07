@@ -153,6 +153,32 @@ class TestGetMboxByQuery:
         result = node.get_mbox_by_query('test query')
         assert result == sample_mbox
 
+    def test_full_threads_adds_t_param(self, sample_mbox: bytes) -> None:
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = gzip.compress(sample_mbox)
+        mock_session.post.return_value = mock_resp
+        node.set_requests_session(mock_session)
+
+        node.get_mbox_by_query('test query', full_threads=True)
+        url = mock_session.post.call_args[0][0]
+        assert '&t=1&' in url
+
+    def test_no_full_threads_omits_t_param(self, sample_mbox: bytes) -> None:
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = gzip.compress(sample_mbox)
+        mock_session.post.return_value = mock_resp
+        node.set_requests_session(mock_session)
+
+        node.get_mbox_by_query('test query')
+        url = mock_session.post.call_args[0][0]
+        assert 't=1' not in url
+
     def test_http_error(self) -> None:
         node = LoreNode('https://lore.kernel.org/all')
         mock_session = MagicMock()
