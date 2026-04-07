@@ -1,7 +1,7 @@
 CHANGELOG
 =========
 
-v0.5.0 (unreleased)
+v0.5.0 (2026-04-07)
 --------------------
 - Add optional filesystem caching to LoreNode via new cache_dir and
   cache_ttl constructor parameters. When cache_dir is set, raw mbox
