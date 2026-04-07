@@ -3,10 +3,13 @@
 """LoreNode — primary API for interacting with public-inbox servers."""
 from __future__ import annotations
 
+import concurrent.futures
 import gzip
 import hashlib
+import json
 import logging
 import os
+import subprocess
 import time
 import types
 import urllib.parse
@@ -26,6 +29,55 @@ from liblore.utils import (
 logger = logging.getLogger(__name__)
 
 
+def _get_config_from_git(
+    regexp: str,
+    multivals: list[str] | None = None,
+) -> dict[str, str | list[str]]:
+    """Read git config keys matching *regexp* in one shot.
+
+    Uses ``git config -z --get-regexp`` to fetch all matching keys
+    with NUL-separated output (safe for values containing newlines).
+
+    Single-valued keys are stored as strings.  Keys listed in
+    *multivals* are collected into lists.
+
+    Returns an empty dict on any failure (git not installed, not in a
+    repo, no matching keys, etc.).
+    """
+    if multivals is None:
+        multivals = []
+    try:
+        result = subprocess.run(
+            ['git', 'config', '-z', '--get-regexp', regexp],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return {}
+    except Exception:
+        return {}
+
+    config: dict[str, str | list[str]] = {}
+    for entry in result.stdout.split('\x00'):
+        if not entry:
+            continue
+        if '\n' in entry:
+            key, value = entry.split('\n', 1)
+        else:
+            key, value = entry, 'true'
+        # Extract the last component: "lore.fallback" → "fallback"
+        cfgkey = key.rsplit('.', maxsplit=1)[-1].lower()
+        if cfgkey in multivals:
+            existing = config.get(cfgkey)
+            if not isinstance(existing, list):
+                existing = []
+                config[cfgkey] = existing
+            existing.append(value)
+        else:
+            config[cfgkey] = value
+
+    return config
+
+
 class LoreNode:
     """A connection to a single public-inbox endpoint.
 
@@ -41,6 +93,10 @@ class LoreNode:
         self,
         url: str = 'https://lore.kernel.org/all',
         *,
+        fallback_urls: list[str] | None = None,
+        auto_probe: bool = False,
+        probe_timeout: float = 5.0,
+        probe_ttl: int = 3600,
         add_auth_headers: bool = False,
         cache_dir: str | None = None,
         cache_ttl: int = 600,
@@ -48,9 +104,38 @@ class LoreNode:
         self._url = url.rstrip('/')
         self._session: requests.Session | None = None
         self._owns_session = False
+        self._user_agent_plus: str | None = None
         self._user_agent: str = f'liblore/{__import__("liblore").__version__}'
         self._cache_dir = cache_dir
         self._cache_ttl = cache_ttl
+        self._auto_probe = auto_probe
+        self._probe_timeout = probe_timeout
+        self._probe_ttl = probe_ttl
+        self._probe_done = False
+
+        # Parse the canonical URL into origin (scheme+host) and path suffix
+        parsed = urllib.parse.urlparse(self._url)
+        self._canonical_origin = f'{parsed.scheme}://{parsed.netloc}'
+
+        # Build the ordered list of origins to try
+        self._all_origins: list[str] = []
+        for fb in (fallback_urls or []):
+            fb = fb.rstrip('/')
+            fb_parsed = urllib.parse.urlparse(fb)
+            if not fb_parsed.scheme or not fb_parsed.netloc:
+                raise LibloreError(
+                    f'Invalid fallback URL (expected scheme://host): {fb!r}'
+                )
+            if fb_parsed.path and fb_parsed.path != '/':
+                raise LibloreError(
+                    f'Fallback URL must be a scheme://host origin, '
+                    f'not a full path: {fb!r}. '
+                    f'The path from the primary URL is preserved '
+                    f'automatically.'
+                )
+            self._all_origins.append(fb)
+        self._all_origins.append(self._canonical_origin)
+
         if cache_dir is not None:
             os.makedirs(cache_dir, exist_ok=True)
         self._authheaders: types.ModuleType | None = None
@@ -65,14 +150,112 @@ class LoreNode:
                 )
 
     # -----------------------------------------------------------------
+    # Git config integration
+    # -----------------------------------------------------------------
+
+    @classmethod
+    def from_git_config(
+        cls,
+        url: str = 'https://lore.kernel.org/all',
+        **kwargs: object,
+    ) -> LoreNode:
+        """Create a :class:`LoreNode` using ``[lore]`` settings from git config.
+
+        Reads the following keys (in standard git config order:
+        repo → global → system, with repo overriding global):
+
+        ``lore.fallback``
+            Multi-valued.  Each value is an origin URL prefix
+            (``scheme://host``) to try before the canonical URL.
+            Tried in the order listed.
+
+        ``lore.autoprobe``
+            Boolean.  When ``true``, automatically probe all origins
+            on the first request and reorder by latency.
+
+        ``lore.probetimeout``
+            Float (seconds).  Per-origin timeout for probes.
+            Defaults to 5.0.
+
+        ``lore.probettl``
+            Integer (seconds).  How long cached probe results stay
+            valid.  Defaults to 3600.
+
+        ``lore.useragentplus``
+            String.  A unique identifier appended to the User-Agent
+            header as ``app/version+IDENTIFIER``.  Used by server
+            operators to identify and prioritize known installations.
+            Typically a UUID.  Applied automatically when
+            :meth:`set_user_agent` is called without an explicit
+            *plus* argument.
+
+        Any keyword argument passed explicitly takes precedence over
+        the git config value.  Failures reading git config (git not
+        installed, not in a repo, keys missing) are silently ignored.
+
+        Example git config::
+
+            [lore]
+                fallback = https://tor.lore.kernel.org
+                fallback = https://sea.lore.kernel.org
+                autoprobe = true
+                useragentplus = 550e8400-e29b-41d4-a716-446655440000
+
+        Example usage::
+
+            with LoreNode.from_git_config() as node:
+                msgs = node.get_thread_by_msgid('test@example.com')
+        """
+        gitcfg = _get_config_from_git(r'^lore\.', multivals=['fallback'])
+
+        if 'fallback_urls' not in kwargs:
+            fallbacks = gitcfg.get('fallback')
+            if isinstance(fallbacks, list) and fallbacks:
+                kwargs['fallback_urls'] = fallbacks
+
+        if 'auto_probe' not in kwargs:
+            val = gitcfg.get('autoprobe')
+            if isinstance(val, str):
+                kwargs['auto_probe'] = val.lower() == 'true'
+
+        if 'probe_timeout' not in kwargs:
+            val = gitcfg.get('probetimeout')
+            if isinstance(val, str):
+                try:
+                    kwargs['probe_timeout'] = float(val)
+                except ValueError:
+                    pass
+
+        if 'probe_ttl' not in kwargs:
+            val = gitcfg.get('probettl')
+            if isinstance(val, str):
+                try:
+                    kwargs['probe_ttl'] = int(val)
+                except ValueError:
+                    pass
+
+        node = cls(url, **kwargs)  # type: ignore[arg-type]
+
+        val = gitcfg.get('useragentplus')
+        if isinstance(val, str) and val:
+            node._user_agent_plus = val
+
+        return node
+
+    # -----------------------------------------------------------------
     # Session management
     # -----------------------------------------------------------------
 
     def set_user_agent(self, app_name: str, version: str, plus: str | None = None) -> None:
-        """Set the User-Agent to ``app_name/version`` (optionally ``+plus``)."""
+        """Set the User-Agent to ``app_name/version`` (optionally ``+plus``).
+
+        When *plus* is not provided, the value from ``lore.useragentplus``
+        in git config is used (if it was loaded via :meth:`from_git_config`).
+        """
         self._user_agent = f'{app_name}/{version}'
-        if plus:
-            self._user_agent += f'+{plus}'
+        effective_plus = plus or self._user_agent_plus
+        if effective_plus:
+            self._user_agent += f'+{effective_plus}'
         logger.debug('Set user-agent to: %s', self._user_agent)
         if self._session is not None and self._owns_session:
             self._session.headers.update({'User-Agent': self._user_agent})
@@ -117,6 +300,206 @@ class LoreNode:
     def hostname(self) -> str:
         """The hostname extracted from the URL, for logging and display."""
         return urllib.parse.urlparse(self._url).hostname or self._url
+
+    # -----------------------------------------------------------------
+    # URL fallback
+    # -----------------------------------------------------------------
+
+    def _rewrite_url(self, url: str, origin: str) -> str:
+        """Replace the canonical origin in *url* with *origin*."""
+        return origin + url[len(self._canonical_origin):]
+
+    def _probe_cache_key(self) -> str:
+        """Cache key for probe results, stable regardless of current order."""
+        origins = '\0'.join(sorted(self._all_origins))
+        return hashlib.sha256(
+            f'probe\0{origins}'.encode(),
+        ).hexdigest()
+
+    def _probe_cache_read(self) -> list[str] | None:
+        """Return cached origin order if fresh, or None."""
+        if self._cache_dir is None:
+            return None
+        key = self._probe_cache_key()
+        path = os.path.join(self._cache_dir, f'{key}.lore.cache')
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            return None
+        age = int(time.time() - st.st_mtime)
+        if age > self._probe_ttl:
+            logger.debug('Probe cache expired (%ds > %ds)', age, self._probe_ttl)
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            return None
+        with open(path, 'rb') as f:
+            try:
+                origins: list[str] = json.loads(f.read())
+            except (json.JSONDecodeError, ValueError):
+                return None
+        # Validate: must contain exactly the same origins we know about
+        if set(origins) != set(self._all_origins):
+            return None
+        logger.debug('Probe cache hit (%ds old)', age)
+        return origins
+
+    def _probe_cache_write(self, origins: list[str]) -> None:
+        """Write probe results to cache."""
+        if self._cache_dir is None:
+            return
+        key = self._probe_cache_key()
+        path = os.path.join(self._cache_dir, f'{key}.lore.cache')
+        tmp_path = path + '.tmp'
+        try:
+            with open(tmp_path, 'wb') as f:
+                f.write(json.dumps(origins).encode())
+            os.replace(tmp_path, path)
+        except OSError:
+            logger.debug('Failed to write probe cache: %s', path)
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def _probe_one(self, origin: str) -> tuple[str, float]:
+        """HEAD manifest.js.gz on *origin*, return (origin, elapsed).
+
+        Uses a throwaway session to be thread-safe.  Returns
+        ``float('inf')`` for unreachable or erroring origins.
+        """
+        url = f'{origin}/manifest.js.gz'
+        try:
+            start = time.monotonic()
+            resp = requests.head(
+                url,
+                headers={'User-Agent': self._user_agent},
+                timeout=self._probe_timeout,
+            )
+            elapsed = time.monotonic() - start
+            if resp.status_code >= 400:
+                logger.debug('Probe %s returned %d', origin, resp.status_code)
+                return origin, float('inf')
+            logger.debug('Probe %s: %.3fs', origin, elapsed)
+            return origin, elapsed
+        except Exception as exc:
+            logger.debug('Probe %s failed: %s', origin, exc)
+            return origin, float('inf')
+
+    def probe_origins(self, nocache: bool = False) -> list[tuple[str, float]]:
+        """Probe all origins concurrently and reorder by response time.
+
+        Sends a ``HEAD`` request to ``/manifest.js.gz`` on each origin
+        (a lightweight resource present on all public-inbox instances)
+        and sorts :attr:`_all_origins` fastest-first.  Unreachable
+        origins are moved to the end rather than removed, so they can
+        recover on subsequent requests.
+
+        Results are cached to *cache_dir* (when set) for *probe_ttl*
+        seconds so repeated calls are cheap.  Pass *nocache=True* to
+        skip the cache and always perform a live probe (results are
+        still written to cache afterward).
+
+        Returns a list of ``(origin, elapsed_seconds)`` pairs in the
+        new order.  Unreachable origins have ``float('inf')`` as their
+        elapsed time.
+        """
+        if len(self._all_origins) <= 1:
+            self._probe_done = True
+            return [(self._all_origins[0], 0.0)] if self._all_origins else []
+
+        # Try cached results first
+        if not nocache:
+            cached = self._probe_cache_read()
+            if cached is not None:
+                self._all_origins = cached
+                self._probe_done = True
+                return [(o, 0.0) for o in cached]
+
+        # Probe all origins concurrently
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(self._all_origins),
+        ) as pool:
+            results = list(pool.map(self._probe_one, self._all_origins))
+
+        results.sort(key=lambda x: x[1])
+        self._all_origins = [origin for origin, _ in results]
+        self._probe_done = True
+
+        # Log the results
+        for origin, elapsed in results:
+            if elapsed == float('inf'):
+                logger.info('Probe result: %s — unreachable', origin)
+            else:
+                logger.info('Probe result: %s — %.3fs', origin, elapsed)
+
+        self._probe_cache_write(self._all_origins)
+        return results
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        raise_on_error: bool = True,
+        **kwargs: object,
+    ) -> requests.Response:
+        """Execute an HTTP request with fallback URL rotation.
+
+        Tries each origin in :attr:`_all_origins`.  On retriable
+        failures (connection errors, timeouts, 5xx responses), logs a
+        warning and tries the next origin.
+
+        When *raise_on_error* is ``False``, returns the last response
+        even when every origin failed (used by
+        :meth:`_fetch_thread_since` which returns ``[]`` on error).
+        """
+        if self._auto_probe and not self._probe_done:
+            self.probe_origins()
+
+        session = self._get_session()
+        last_exc: Exception | None = None
+        last_resp: requests.Response | None = None
+
+        for origin in self._all_origins:
+            request_url = self._rewrite_url(url, origin)
+            logger.debug('Trying %s %s', method, request_url)
+            try:
+                resp: requests.Response = getattr(
+                    session, method.lower(),
+                )(request_url, **kwargs)
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                logger.warning(
+                    'Request to %s failed (%s), trying next host',
+                    origin, exc,
+                )
+                last_exc = exc
+                continue
+
+            if resp.status_code >= 500:
+                logger.warning(
+                    'Request to %s returned %d, trying next host',
+                    origin, resp.status_code,
+                )
+                last_resp = resp
+                continue
+
+            # Success or 4xx — not retriable
+            return resp
+
+        # All origins exhausted
+        if not raise_on_error and last_resp is not None:
+            return last_resp
+
+        if last_exc is not None:
+            raise RemoteError(
+                f'All hosts failed for {url}: {last_exc}'
+            ) from last_exc
+
+        # last_resp must be a 5xx from the final origin
+        assert last_resp is not None
+        return last_resp
 
     # -----------------------------------------------------------------
     # Cache
@@ -210,9 +593,7 @@ class LoreNode:
                 return cached
 
         mbox_url = f'{self._url}/{urllib.parse.quote_plus(msgid)}/t.mbox.gz'
-        logger.debug('Fetching mbox from: %s', mbox_url)
-        session = self._get_session()
-        resp = session.get(mbox_url)
+        resp = self._request('GET', mbox_url)
         if resp.status_code != 200:
             raise RemoteError('Server returned an error: %s' % resp.status_code)
         t_mbox = gzip.decompress(resp.content)
@@ -242,9 +623,7 @@ class LoreNode:
 
         t_param = '&t=1' if full_threads else ''
         query_url = self._url + '/?x=m' + t_param + '&q=' + urllib.parse.quote_plus(query)
-        logger.debug('query=%s', query_url)
-        session = self._get_session()
-        resp = session.post(query_url, data='x=m')
+        resp = self._request('POST', query_url, data='x=m')
         if resp.status_code != 200:
             raise RemoteError('Server returned an error: %s' % resp.status_code)
         t_mbox = gzip.decompress(resp.content)
@@ -331,9 +710,7 @@ class LoreNode:
         qmsgid = urllib.parse.quote_plus(msgid)
         query = urllib.parse.quote_plus(query_fragment)
         search_url = f'{self._url}/{qmsgid}/?x=m&q={query}'
-        logger.debug('Fetching thread updates from: %s', search_url)
-        session = self._get_session()
-        resp = session.post(search_url, data='')
+        resp = self._request('POST', search_url, raise_on_error=False, data='')
         if resp.status_code != 200:
             return []
         t_mbox = gzip.decompress(resp.content)
@@ -413,12 +790,12 @@ class LoreNode:
                 return cached
 
         raw_url = f'{self._url}/{urllib.parse.quote_plus(msgid)}/raw'
-        logger.debug('Fetching message from: %s', raw_url)
         try:
-            session = self._get_session()
-            response = session.get(raw_url)
+            response = self._request('GET', raw_url)
             response.raise_for_status()
             data = response.content
+        except RemoteError:
+            raise
         except Exception as ex:
             raise RemoteError(f'Failed to fetch message from {raw_url}: {ex}') from ex
 

@@ -62,6 +62,114 @@ from liblore import LoreNode
 node = LoreNode(url="https://lore.kernel.org/all")
 ```
 
+#### Git Config Integration
+
+The easiest way to create a `LoreNode` is via `from_git_config()`, which reads
+settings from the `[lore]` section of your git config (repo, global, or
+system). This gives you per-repository overrides for free -- a subsystem
+maintainer with a local mirror just adds settings to their repo's
+`.git/config`:
+
+```python
+with LoreNode.from_git_config() as node:
+    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+```
+
+Supported git config keys:
+
+```ini
+[lore]
+    # Origin URLs to try before the canonical URL (multi-valued, in order)
+    fallback = https://tor.lore.kernel.org
+    fallback = https://sea.lore.kernel.org
+
+    # Auto-probe all origins on first request, reorder by latency
+    autoprobe = true
+
+    # Per-origin probe timeout in seconds (default: 5.0)
+    probetimeout = 5.0
+
+    # How long cached probe results stay valid, in seconds (default: 3600)
+    probettl = 3600
+
+    # Unique identifier appended to User-Agent (typically a UUID)
+    useragentplus = 550e8400-e29b-41d4-a716-446655440000
+```
+
+All keys are optional. Missing keys, missing git, or any other failure is
+silently ignored. Explicit keyword arguments to `from_git_config()` take
+precedence over git config values.
+
+#### Fallback URLs
+
+lore.kernel.org uses geodns across multiple nodes. When a node is slow or
+unavailable, `fallback_urls` lets you specify alternative servers to try
+automatically:
+
+```python
+with LoreNode(
+    "https://lore.kernel.org/all",
+    fallback_urls=[
+        "http://mymirror.local",
+        "https://tor.lore.kernel.org",
+        "https://sea.lore.kernel.org",
+    ],
+) as node:
+    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+```
+
+Each fallback is an **origin prefix** (`scheme://host`). The path from the
+primary URL is preserved automatically, so `https://lore.kernel.org/all/...`
+becomes `http://mymirror.local/all/...`. This supports mixing `https` and
+`http` schemes -- useful for local mirrors or `.onion` endpoints where TOR
+provides the encryption layer.
+
+On each HTTP request, origins are tried in order. Connection errors, timeouts,
+and 5xx responses trigger a fall-through to the next origin. 4xx responses
+(the resource genuinely doesn't exist) are returned immediately without
+retrying. The `validate()` method intentionally skips fallback and checks only
+the canonical URL.
+
+Cache keys always use the canonical URL, so cache hits work regardless of
+which mirror served the response.
+
+#### Origin Probing
+
+When you have multiple fallback URLs, `probe_origins()` finds the fastest
+mirror by sending a concurrent `HEAD` request to `/manifest.js.gz` on each
+origin:
+
+```python
+node = LoreNode(
+    "https://lore.kernel.org/all",
+    fallback_urls=["https://tor.lore.kernel.org", "https://sea.lore.kernel.org"],
+)
+
+# Probe all origins concurrently and reorder by latency
+results = node.probe_origins()
+for origin, elapsed in results:
+    print(f"{origin}: {elapsed*1000:.0f}ms")
+```
+
+Unreachable origins are moved to the end rather than removed, so they can
+recover on subsequent requests. Probe results are cached to `cache_dir` (when
+set) for `probe_ttl` seconds (default 3600 = 1 hour). Pass `nocache=True` to
+force a live probe even when cached results exist (the fresh results are still
+written back to cache).
+
+Set `auto_probe=True` to trigger probing transparently on the first request:
+
+```python
+with LoreNode(
+    "https://lore.kernel.org/all",
+    fallback_urls=["https://tor.lore.kernel.org"],
+    auto_probe=True,
+    cache_dir="/tmp/liblore-cache",
+) as node:
+    # First request probes, reorders, then fetches via the fastest mirror
+    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+```
+
 #### Caching
 
 LoreNode can optionally cache raw mbox bytes on disk. Pass `cache_dir` to
@@ -236,6 +344,26 @@ identifying your tool:
 ```python
 node.set_user_agent("my-tool", "1.0")
 # User-Agent: my-tool/1.0
+```
+
+The optional `plus` argument appends a unique identifier that server operators
+can use to identify and prioritize known installations:
+
+```python
+node.set_user_agent("my-tool", "1.0", plus="550e8400-e29b-41d4")
+# User-Agent: my-tool/1.0+550e8400-e29b-41d4
+```
+
+When `plus` is not provided and the node was created via `from_git_config()`,
+the value of `lore.useragentplus` from git config is used automatically. This
+way a single git config entry identifies the installation across all tools
+using liblore:
+
+```python
+# With lore.useragentplus = myuuid in ~/.gitconfig:
+node = LoreNode.from_git_config()
+node.set_user_agent("korgalore", "0.7")
+# User-Agent: korgalore/0.7+myuuid
 ```
 
 **`node.set_requests_session(session)`** -- inject your own
