@@ -1,6 +1,32 @@
 CHANGELOG
 =========
 
+v0.7.0 (2026-04-08)
+--------------------
+- Add public request() method to LoreNode for making arbitrary HTTP
+  requests through the failover machinery. Downstream projects like
+  korgalore can now route their own HTTP calls (e.g. manifest.js.gz
+  fetches) through LoreNode's origin rotation and auto-probe support
+  without reimplementing the failover logic. Always raises RemoteError
+  when all origins are exhausted.
+
+- Add read-only user_agent_plus property exposing the
+  lore.useragentplus value from git config. Downstream projects can
+  reuse this tracking identifier in their own user-agent strings (e.g.
+  for git HTTP or lei CLI flags) without re-reading git config or
+  accessing private attributes.
+
+- Add read-only origins property returning a copy of all configured
+  origins in their current probe order (fallbacks first, then
+  canonical). After probe_origins() runs, the list reflects the
+  fastest-first reordering. Useful for logging, diagnostics, and UI
+  display of configured mirrors.
+
+- Add read-only canonical_origin property returning the scheme://host
+  origin extracted from the primary URL. Paired with origins, lets
+  callers distinguish the configured primary from fallback mirrors and
+  construct URLs suitable for the request() method.
+
 v0.6.1 (2026-04-08)
 --------------------
 - Fix get_mbox_by_msgid() returning 404 when the configured URL does

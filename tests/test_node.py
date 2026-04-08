@@ -1395,3 +1395,177 @@ class TestGetConfigFromGit:
             cfg = _get_config_from_git(r'^lore\.')
 
         assert cfg == {'autoprobe': 'true'}
+
+
+# =====================================================================
+# Public API: request()
+# =====================================================================
+
+class TestRequest:
+    """Tests for the public request() method."""
+
+    def test_delegates_to_private_request(self, sample_mbox: bytes) -> None:
+        """request() delegates to _request() with raise_on_error=True."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_session.get.return_value = mock_resp
+        node.set_requests_session(mock_session)
+
+        resp = node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        assert resp.status_code == 200
+
+    def test_failover_works(self, sample_mbox: bytes) -> None:
+        """First origin fails, second succeeds."""
+        node = LoreNode(
+            'https://lore.kernel.org/all',
+            fallback_urls=['http://mirror.local'],
+        )
+        mock_session = MagicMock()
+        mock_200 = MagicMock()
+        mock_200.status_code = 200
+        mock_session.get.side_effect = [
+            requests.ConnectionError('refused'),
+            mock_200,
+        ]
+        node.set_requests_session(mock_session)
+
+        resp = node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        assert resp.status_code == 200
+        assert mock_session.get.call_count == 2
+
+    def test_raises_remote_error_when_all_fail(self) -> None:
+        """RemoteError raised when every origin fails."""
+        node = LoreNode(
+            'https://lore.kernel.org/all',
+            fallback_urls=['http://mirror.local'],
+        )
+        mock_session = MagicMock()
+        mock_session.get.side_effect = requests.ConnectionError('refused')
+        node.set_requests_session(mock_session)
+
+        with pytest.raises(RemoteError, match='All hosts failed'):
+            node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+
+    def test_kwargs_forwarded(self) -> None:
+        """Extra kwargs (e.g. timeout) are passed through."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_session.get.return_value = mock_resp
+        node.set_requests_session(mock_session)
+
+        node.request(
+            'GET', 'https://lore.kernel.org/manifest.js.gz',
+            timeout=30,
+        )
+        _, kwargs = mock_session.get.call_args
+        assert kwargs['timeout'] == 30
+
+
+# =====================================================================
+# Public API: user_agent_plus property
+# =====================================================================
+
+class TestUserAgentPlusProperty:
+    """Tests for the user_agent_plus read-only property."""
+
+    def test_none_when_created_directly(self) -> None:
+        """None when created via LoreNode() without git config."""
+        node = LoreNode()
+        assert node.user_agent_plus is None
+
+    def test_set_via_from_git_config(self) -> None:
+        """Populated when created via from_git_config() with the key set."""
+        gitcfg: dict[str, str | list[str]] = {
+            'useragentplus': 'my-tracking-uuid',
+        }
+        with patch('liblore.node._get_config_from_git', return_value=gitcfg):
+            node = LoreNode.from_git_config()
+
+        assert node.user_agent_plus == 'my-tracking-uuid'
+
+    def test_read_only(self) -> None:
+        """Property has no setter — assignment raises AttributeError."""
+        node = LoreNode()
+        with pytest.raises(AttributeError):
+            node.user_agent_plus = 'nope'  # type: ignore[misc]
+
+
+# =====================================================================
+# Public API: origins property
+# =====================================================================
+
+class TestOriginsProperty:
+    """Tests for the origins read-only property."""
+
+    def test_returns_fallbacks_plus_canonical(self) -> None:
+        """Returns fallbacks followed by the canonical origin."""
+        node = LoreNode(
+            'https://lore.kernel.org/all',
+            fallback_urls=['http://mirror.local', 'https://ams.lore.kernel.org'],
+        )
+        assert node.origins == [
+            'http://mirror.local',
+            'https://ams.lore.kernel.org',
+            'https://lore.kernel.org',
+        ]
+
+    def test_returns_copy(self) -> None:
+        """Mutating the returned list does not affect the node."""
+        node = LoreNode(
+            'https://lore.kernel.org/all',
+            fallback_urls=['http://mirror.local'],
+        )
+        origins = node.origins
+        origins.append('https://injected.example.com')
+        assert 'https://injected.example.com' not in node.origins
+
+    def test_reflects_reordering_after_probe(self) -> None:
+        """After probe_origins(), list reflects the new order."""
+        node = LoreNode(
+            'https://lore.kernel.org/all',
+            fallback_urls=['https://slow.example.com', 'https://fast.example.com'],
+        )
+        latencies = {
+            'slow.example.com': 2.0,
+            'fast.example.com': 0.1,
+            'lore.kernel.org': 0.5,
+        }
+
+        def fake_probe_one(origin: str) -> tuple[str, float]:
+            for host, lat in latencies.items():
+                if host in origin:
+                    return origin, lat
+            return origin, float('inf')
+
+        with patch.object(node, '_probe_one', side_effect=fake_probe_one):
+            node.probe_origins()
+
+        assert node.origins[0] == 'https://fast.example.com'
+
+
+# =====================================================================
+# Public API: canonical_origin property
+# =====================================================================
+
+class TestCanonicalOriginProperty:
+    """Tests for the canonical_origin read-only property."""
+
+    def test_matches_scheme_host(self) -> None:
+        """Returns scheme://host from the URL passed to __init__."""
+        node = LoreNode('https://lore.kernel.org/all')
+        assert node.canonical_origin == 'https://lore.kernel.org'
+
+    def test_no_path_component(self) -> None:
+        """The origin has no path, even when the URL does."""
+        node = LoreNode('https://lore.kernel.org/some/deep/path')
+        assert node.canonical_origin == 'https://lore.kernel.org'
+        assert '/some' not in node.canonical_origin
+
+    def test_preserves_port(self) -> None:
+        """Port number is included in the origin when present."""
+        node = LoreNode('http://localhost:8080/inbox')
+        assert node.canonical_origin == 'http://localhost:8080'

@@ -246,6 +246,17 @@ class LoreNode:
     # Session management
     # -----------------------------------------------------------------
 
+    @property
+    def user_agent_plus(self) -> str | None:
+        """The ``lore.useragentplus`` value from git config, or None.
+
+        Only populated when the node was created via
+        :meth:`from_git_config`.  Downstream projects can use this to
+        include the same tracking identifier in their own user-agent
+        strings (e.g. for git HTTP or CLI tools).
+        """
+        return self._user_agent_plus
+
     def set_user_agent(self, app_name: str, version: str, plus: str | None = None) -> None:
         """Set the User-Agent to ``app_name/version`` (optionally ``+plus``).
 
@@ -300,6 +311,26 @@ class LoreNode:
     def hostname(self) -> str:
         """The hostname extracted from the URL, for logging and display."""
         return urllib.parse.urlparse(self._url).hostname or self._url
+
+    @property
+    def origins(self) -> list[str]:
+        """All configured origins in current probe order.
+
+        The list includes fallback origins followed by the canonical
+        origin.  After :meth:`probe_origins` runs, the list is reordered
+        fastest-first.  Returns a copy to prevent external mutation.
+        """
+        return list(self._all_origins)
+
+    @property
+    def canonical_origin(self) -> str:
+        """The scheme://host origin extracted from the primary URL.
+
+        This is the origin that ``request()`` URLs must use — the
+        failover mechanism rewrites this portion when trying fallback
+        origins.
+        """
+        return self._canonical_origin
 
     # -----------------------------------------------------------------
     # URL fallback
@@ -436,6 +467,27 @@ class LoreNode:
 
         self._probe_cache_write(self._all_origins)
         return results
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        **kwargs: object,
+    ) -> requests.Response:
+        """Execute an HTTP request with origin failover.
+
+        The *url* must use the canonical origin (the URL passed to
+        ``__init__``).  On retriable failures — connection errors,
+        timeouts, and 5xx responses — each configured fallback origin is
+        tried in order.  4xx responses are returned immediately (not
+        retriable).
+
+        Raises :class:`RemoteError` when every origin has been exhausted.
+
+        Any extra *kwargs* are forwarded to the underlying
+        ``requests.Session`` method (e.g. ``timeout``, ``headers``).
+        """
+        return self._request(method, url, raise_on_error=True, **kwargs)
 
     def _request(
         self,
