@@ -1,6 +1,14 @@
 CHANGELOG
 =========
 
+v0.6.1 (2026-04-08)
+--------------------
+- Fix get_mbox_by_msgid() returning 404 when the configured URL does
+  not include the correct list path.  On a 404, the method now falls
+  back to a HEAD request against the bare server origin and follows
+  the redirect to discover the canonical list path, then fetches the
+  mbox from the resolved location.
+
 v0.6.0 (2026-04-08)
 --------------------
 - Add URL-level failover via new fallback_urls constructor parameter.

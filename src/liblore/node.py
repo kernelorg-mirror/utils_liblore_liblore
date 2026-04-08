@@ -585,15 +585,28 @@ class LoreNode:
     # -----------------------------------------------------------------
 
     def get_mbox_by_msgid(self, msgid: str, *, nocache: bool = False) -> bytes:
-        """Fetch a thread mbox by message ID and return the raw bytes."""
+        """Fetch a thread mbox by message ID and return the raw bytes.
+
+        On a 404, falls back to a HEAD request against the bare server
+        origin to discover the correct list path via redirect.  This
+        handles public-inbox servers where the configured URL does not
+        include the archive path (e.g. ``https://lore.kernel.org``
+        instead of ``https://lore.kernel.org/all``).
+        """
         key = self._cache_key('mbox_by_msgid', msgid)
         if not nocache:
             cached = self._cache_read(key)
             if cached is not None:
                 return cached
 
-        mbox_url = f'{self._url}/{urllib.parse.quote_plus(msgid)}/t.mbox.gz'
+        qmsgid = urllib.parse.quote_plus(msgid)
+        mbox_url = f'{self._url}/{qmsgid}/t.mbox.gz'
         resp = self._request('GET', mbox_url)
+        if resp.status_code == 404:
+            # The message may live under a different list path.  Try a
+            # HEAD against the bare origin and follow redirects to
+            # discover the canonical location.
+            resp = self._resolve_msgid_via_head(qmsgid)
         if resp.status_code != 200:
             raise RemoteError('Server returned an error: %s' % resp.status_code)
         t_mbox = gzip.decompress(resp.content)
@@ -601,6 +614,27 @@ class LoreNode:
 
         self._cache_write(key, t_mbox)
         return t_mbox
+
+    def _resolve_msgid_via_head(self, qmsgid: str) -> requests.Response:
+        """HEAD the bare origin to discover the list path, then GET the mbox.
+
+        Public-inbox servers redirect ``/{msgid}/`` to
+        ``/{list}/{msgid}/`` when the message-id is found.  This method
+        follows that redirect and fetches the mbox from the discovered
+        location.  Returns the response from the final GET (or the
+        failed HEAD response if no redirect was found).
+        """
+        head_url = f'{self._canonical_origin}/{qmsgid}/'
+        session = self._get_session()
+        logger.debug('Trying HEAD %s for redirect discovery', head_url)
+        head_resp = session.head(head_url, allow_redirects=True)
+        if head_resp.status_code == 200 and head_resp.url != head_url:
+            # Redirected — use the resolved location
+            resolved = head_resp.url.rstrip('/')
+            mbox_url = f'{resolved}/t.mbox.gz'
+            logger.debug('Resolved via redirect: %s', mbox_url)
+            return self._request('GET', mbox_url)
+        return head_resp
 
     def get_mbox_by_query(
         self,

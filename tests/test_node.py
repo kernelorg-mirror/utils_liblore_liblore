@@ -140,6 +140,54 @@ class TestGetMboxByMsgid:
         with pytest.raises(RemoteError, match='Server returned an error'):
             node.get_mbox_by_msgid('test@x.com')
 
+    def test_404_falls_back_to_head_redirect(self, sample_mbox: bytes) -> None:
+        """On 404, try HEAD against the bare origin to discover the list path."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+
+        # First GET returns 404
+        mock_404 = MagicMock()
+        mock_404.status_code = 404
+
+        # HEAD follows redirect and succeeds
+        mock_head = MagicMock()
+        mock_head.status_code = 200
+        mock_head.url = 'https://lore.kernel.org/tools/test%40example.com/'
+
+        # Second GET (to resolved URL) succeeds
+        mock_200 = MagicMock()
+        mock_200.status_code = 200
+        mock_200.content = gzip.compress(sample_mbox)
+
+        mock_session.get.side_effect = [mock_404, mock_200]
+        mock_session.head.return_value = mock_head
+        node.set_requests_session(mock_session)
+
+        result = node.get_mbox_by_msgid('test@example.com')
+        assert result == sample_mbox
+        # Verify the HEAD was sent to the bare origin
+        mock_session.head.assert_called_once()
+        head_url = mock_session.head.call_args[0][0]
+        assert head_url == 'https://lore.kernel.org/test%40example.com/'
+
+    def test_404_no_redirect_raises(self) -> None:
+        """When HEAD also 404s (no redirect), raise RemoteError."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+
+        mock_404 = MagicMock()
+        mock_404.status_code = 404
+
+        mock_head_404 = MagicMock()
+        mock_head_404.status_code = 404
+
+        mock_session.get.return_value = mock_404
+        mock_session.head.return_value = mock_head_404
+        node.set_requests_session(mock_session)
+
+        with pytest.raises(RemoteError, match='Server returned an error: 404'):
+            node.get_mbox_by_msgid('nonexistent@example.com')
+
 
 class TestGetMboxByQuery:
     def test_returns_raw_bytes(self, sample_mbox: bytes) -> None:
