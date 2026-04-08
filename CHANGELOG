@@ -1,6 +1,39 @@
 CHANGELOG
 =========
 
+v0.6-dev
+--------
+- Add URL-level failover via new fallback_urls constructor parameter.
+  Fallback URLs are origin prefixes (scheme://host) that support full
+  scheme rewriting, so local http:// mirrors and .onion endpoints work
+  alongside https:// servers. On each request, origins are tried in
+  order; connection errors, timeouts, and 5xx responses fall through
+  to the next origin while 4xx responses are returned immediately.
+  Cache keys always use the canonical URL regardless of which mirror
+  served the response.
+
+- Add concurrent origin probing via probe_origins(), which sends HEAD
+  requests to /manifest.js.gz on all configured origins using
+  ThreadPoolExecutor to find the fastest mirror. Unreachable origins
+  are moved to the end rather than removed. Results are cached to
+  cache_dir for probe_ttl seconds (default 3600). Pass nocache=True
+  to force a live probe even when cached results exist. Set
+  auto_probe=True to trigger probing transparently on the first
+  request.
+
+- Add LoreNode.from_git_config() classmethod that reads settings from
+  the [lore] section of git config (repo, global, or system) via a
+  single "git config -z --get-regexp" call. Supported keys:
+  lore.fallback (multi-value), lore.autoprobe, lore.probetimeout,
+  lore.probettl, lore.useragentplus. All keys are optional; missing
+  git or any failure is silently ignored. Explicit keyword arguments
+  take precedence over git config values.
+
+- set_user_agent() now falls back to the lore.useragentplus value
+  from git config when the caller does not pass an explicit plus=
+  argument, so a single git config entry identifies the installation
+  across all liblore-based tools.
+
 v0.5.0 (2026-04-07)
 --------------------
 - Add optional filesystem caching to LoreNode via new cache_dir and
