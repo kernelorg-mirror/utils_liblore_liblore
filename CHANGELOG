@@ -1,8 +1,8 @@
 CHANGELOG
 =========
 
-v0.6-dev
---------
+v0.6.0 (2026-04-08)
+--------------------
 - Add URL-level failover via new fallback_urls constructor parameter.
   Fallback URLs are origin prefixes (scheme://host) that support full
   scheme rewriting, so local http:// mirrors and .onion endpoints work
