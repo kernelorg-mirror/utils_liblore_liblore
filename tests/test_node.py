@@ -1083,7 +1083,7 @@ class TestProbeOrigins:
             cache_dir=cache_dir,
         )
         # Without patching requests.head — cache should be used
-        results = node2.probe_origins()
+        node2.probe_origins()
         assert node2._all_origins == expected_order
 
     def test_probe_cache_expired(self, tmp_path: object) -> None:
