@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 import types
@@ -74,6 +75,55 @@ def _get_config_from_git(
             existing.append(value)
         else:
             config[cfgkey] = value
+
+    return config
+
+
+def _get_subsection_config(
+    section: str,
+    subsection: str,
+    multivals: list[str] | None = None,
+) -> dict[str, str | list[str]]:
+    """Read git config keys from ``[section "subsection"]``.
+
+    Like :func:`_get_config_from_git`, but handles subsections whose
+    names contain dots (e.g. URLs).  The variable name is extracted by
+    stripping the known ``section.subsection.`` prefix rather than
+    splitting on the last dot.
+
+    Returns an empty dict on any failure.
+    """
+    if multivals is None:
+        multivals = []
+    prefix = f'{section}.{subsection}.'
+    escaped = re.escape(prefix)
+    try:
+        result = subprocess.run(
+            ['git', 'config', '-z', '--get-regexp', f'^{escaped}'],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return {}
+    except Exception:
+        return {}
+
+    config: dict[str, str | list[str]] = {}
+    for entry in result.stdout.split('\x00'):
+        if not entry:
+            continue
+        if '\n' in entry:
+            key, value = entry.split('\n', 1)
+        else:
+            key, value = entry, 'true'
+        varname = key[len(prefix):].lower()
+        if varname in multivals:
+            existing = config.get(varname)
+            if not isinstance(existing, list):
+                existing = []
+                config[varname] = existing
+            existing.append(value)
+        else:
+            config[varname] = value
 
     return config
 
@@ -159,29 +209,33 @@ class LoreNode:
         url: str = 'https://lore.kernel.org/all',
         **kwargs: object,
     ) -> LoreNode:
-        """Create a :class:`LoreNode` using ``[lore]`` settings from git config.
+        """Create a :class:`LoreNode` using settings from git config.
 
-        Reads the following keys (in standard git config order:
-        repo → global → system, with repo overriding global):
+        Looks for per-origin configuration in a ``[liblore "<origin>"]``
+        subsection first, then falls back to ``[lore]`` for
+        lore.kernel.org URLs.  This allows different public-inbox
+        servers to have independent mirror and probe settings.
 
-        ``lore.fallback``
+        Supported keys (in each section):
+
+        ``fallback``
             Multi-valued.  Each value is an origin URL prefix
             (``scheme://host``) to try before the canonical URL.
             Tried in the order listed.
 
-        ``lore.autoprobe``
+        ``autoprobe``
             Boolean.  When ``true``, automatically probe all origins
             on the first request and reorder by latency.
 
-        ``lore.probetimeout``
+        ``probetimeout``
             Float (seconds).  Per-origin timeout for probes.
             Defaults to 5.0.
 
-        ``lore.probettl``
+        ``probettl``
             Integer (seconds).  How long cached probe results stay
             valid.  Defaults to 3600.
 
-        ``lore.useragentplus``
+        ``useragentplus``
             String.  A unique identifier appended to the User-Agent
             header as ``app/version+IDENTIFIER``.  Used by server
             operators to identify and prioritize known installations.
@@ -189,24 +243,48 @@ class LoreNode:
             :meth:`set_user_agent` is called without an explicit
             *plus* argument.
 
+        Lookup order:
+
+        1. ``[liblore "<origin>"]`` — per-origin subsection
+        2. ``[lore]`` — only for ``lore.kernel.org`` URLs (backwards
+           compatibility)
+
         Any keyword argument passed explicitly takes precedence over
         the git config value.  Failures reading git config (git not
         installed, not in a repo, keys missing) are silently ignored.
 
         Example git config::
 
-            [lore]
+            # Per-origin configuration (recommended)
+            [liblore "https://lore.kernel.org"]
                 fallback = https://tor.lore.kernel.org
                 fallback = https://sea.lore.kernel.org
                 autoprobe = true
                 useragentplus = 550e8400-e29b-41d4-a716-446655440000
+
+            [liblore "https://subspace.kernel.org"]
+                fallback = https://subspace-mirror.kernel.org
+
+            # Legacy shorthand for [liblore "https://lore.kernel.org"]
+            [lore]
+                fallback = https://tor.lore.kernel.org
+                autoprobe = true
 
         Example usage::
 
             with LoreNode.from_git_config() as node:
                 msgs = node.get_thread_by_msgid('test@example.com')
         """
-        gitcfg = _get_config_from_git(r'^lore\.', multivals=['fallback'])
+        parsed = urllib.parse.urlparse(url)
+        origin = f'{parsed.scheme}://{parsed.netloc}'
+
+        # Try [liblore "<origin>"] first, fall back to [lore] for
+        # lore.kernel.org.
+        gitcfg = _get_subsection_config(
+            'liblore', origin, multivals=['fallback'],
+        )
+        if not gitcfg and parsed.netloc == 'lore.kernel.org':
+            gitcfg = _get_config_from_git(r'^lore\.', multivals=['fallback'])
 
         if 'fallback_urls' not in kwargs:
             fallbacks = gitcfg.get('fallback')

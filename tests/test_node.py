@@ -1209,10 +1209,14 @@ class TestProbeOrigins:
 # =====================================================================
 
 class TestFromGitConfig:
-    """Tests for LoreNode.from_git_config()."""
+    """Tests for LoreNode.from_git_config() with legacy [lore] section.
+
+    These tests simulate the [lore] fallback path by returning empty
+    from _get_subsection_config (no [liblore] subsection found).
+    """
 
     def test_reads_all_config_keys(self) -> None:
-        """Reads all lore.* keys from a single git config call."""
+        """Reads all lore.* keys via [lore] fallback."""
         gitcfg: dict[str, str | list[str]] = {
             'fallback': [
                 'https://tor.lore.kernel.org',
@@ -1223,7 +1227,8 @@ class TestFromGitConfig:
             'probettl': '7200',
         }
 
-        with patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value=gitcfg):
             node = LoreNode.from_git_config()
 
         assert node._all_origins == [
@@ -1242,7 +1247,8 @@ class TestFromGitConfig:
             'autoprobe': 'true',
         }
 
-        with patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value=gitcfg):
             node = LoreNode.from_git_config(
                 fallback_urls=['https://explicit.example.com'],
                 auto_probe=False,
@@ -1255,15 +1261,17 @@ class TestFromGitConfig:
         assert node._auto_probe is False
 
     def test_git_not_installed(self) -> None:
-        """Works fine when _get_config_from_git returns empty."""
-        with patch('liblore.node._get_config_from_git', return_value={}):
+        """Works fine when both config helpers return empty."""
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value={}):
             node = LoreNode.from_git_config()
 
         assert node._all_origins == ['https://lore.kernel.org']
 
     def test_no_config_keys(self) -> None:
         """Works fine when no lore.* keys exist in git config."""
-        with patch('liblore.node._get_config_from_git', return_value={}):
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value={}):
             node = LoreNode.from_git_config()
 
         assert node._all_origins == ['https://lore.kernel.org']
@@ -1273,14 +1281,16 @@ class TestFromGitConfig:
         """Non-numeric lore.probetimeout is silently ignored."""
         gitcfg: dict[str, str | list[str]] = {'probetimeout': 'notanumber'}
 
-        with patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value=gitcfg):
             node = LoreNode.from_git_config()
 
         assert node._probe_timeout == 5.0  # default
 
     def test_custom_url_passed_through(self) -> None:
         """The url argument is forwarded to __init__."""
-        with patch('liblore.node._get_config_from_git', return_value={}):
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value={}):
             node = LoreNode.from_git_config(
                 url='https://my-inbox.example.com/lists',
             )
@@ -1293,7 +1303,8 @@ class TestFromGitConfig:
             'useragentplus': '550e8400-e29b-41d4',
         }
 
-        with patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value=gitcfg):
             node = LoreNode.from_git_config()
 
         assert node._user_agent_plus == '550e8400-e29b-41d4'
@@ -1307,7 +1318,8 @@ class TestFromGitConfig:
             'useragentplus': 'from-git-config',
         }
 
-        with patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value=gitcfg):
             node = LoreNode.from_git_config()
 
         node.set_user_agent('myapp', '1.0', plus='explicit')
@@ -1325,7 +1337,8 @@ class TestFromGitConfig:
             'useragentplus': 'myuuid',
         }
 
-        with patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value=gitcfg):
             node = LoreNode.from_git_config()
 
         node.set_user_agent('bugspray', '0.3')
@@ -1395,6 +1408,206 @@ class TestGetConfigFromGit:
             cfg = _get_config_from_git(r'^lore\.')
 
         assert cfg == {'autoprobe': 'true'}
+
+
+class TestGetSubsectionConfig:
+    """Tests for the _get_subsection_config() helper."""
+
+    def test_parses_subsection_keys(self) -> None:
+        """Parses keys from [liblore "https://lore.kernel.org"]."""
+        from liblore.node import _get_subsection_config
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = (
+            'liblore.https://lore.kernel.org.fallback\nhttps://tor.lore.kernel.org\x00'
+            'liblore.https://lore.kernel.org.fallback\nhttps://sea.lore.kernel.org\x00'
+            'liblore.https://lore.kernel.org.autoprobe\ntrue\x00'
+            'liblore.https://lore.kernel.org.useragentplus\nmyuuid\x00'
+        )
+        with patch('liblore.node.subprocess.run', return_value=mock_result):
+            cfg = _get_subsection_config(
+                'liblore', 'https://lore.kernel.org', multivals=['fallback'],
+            )
+
+        assert cfg == {
+            'fallback': [
+                'https://tor.lore.kernel.org',
+                'https://sea.lore.kernel.org',
+            ],
+            'autoprobe': 'true',
+            'useragentplus': 'myuuid',
+        }
+
+    def test_dots_in_subsection_handled(self) -> None:
+        """Subsection names with dots (URLs) are parsed correctly."""
+        from liblore.node import _get_subsection_config
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = (
+            'liblore.https://subspace.kernel.org.fallback\nhttps://mirror.example.com\x00'
+        )
+        with patch('liblore.node.subprocess.run', return_value=mock_result):
+            cfg = _get_subsection_config(
+                'liblore', 'https://subspace.kernel.org', multivals=['fallback'],
+            )
+
+        assert cfg == {
+            'fallback': ['https://mirror.example.com'],
+        }
+
+    def test_no_matching_subsection(self) -> None:
+        """Returns empty dict when no keys match the subsection."""
+        from liblore.node import _get_subsection_config
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ''
+        with patch('liblore.node.subprocess.run', return_value=mock_result):
+            cfg = _get_subsection_config(
+                'liblore', 'https://nonexistent.example.com',
+            )
+
+        assert cfg == {}
+
+    def test_git_not_installed(self) -> None:
+        """Returns empty dict when git is not installed."""
+        from liblore.node import _get_subsection_config
+
+        with patch(
+            'liblore.node.subprocess.run',
+            side_effect=FileNotFoundError('git not found'),
+        ):
+            cfg = _get_subsection_config(
+                'liblore', 'https://lore.kernel.org',
+            )
+
+        assert cfg == {}
+
+
+class TestFromGitConfigSubsections:
+    """Tests for from_git_config() with [liblore "<origin>"] subsections."""
+
+    def test_subsection_used_for_lore(self) -> None:
+        """[liblore "https://lore.kernel.org"] is used when present."""
+        subsection_cfg: dict[str, str | list[str]] = {
+            'fallback': ['https://tor.lore.kernel.org'],
+            'autoprobe': 'true',
+            'useragentplus': 'subsection-uuid',
+        }
+
+        with patch('liblore.node._get_subsection_config', return_value=subsection_cfg), \
+             patch('liblore.node._get_config_from_git', return_value={}) as mock_legacy:
+            node = LoreNode.from_git_config()
+
+        assert node._all_origins == [
+            'https://tor.lore.kernel.org',
+            'https://lore.kernel.org',
+        ]
+        assert node._auto_probe is True
+        assert node._user_agent_plus == 'subsection-uuid'
+        # [lore] should NOT be consulted when subsection has config
+        mock_legacy.assert_not_called()
+
+    def test_falls_back_to_lore_section(self) -> None:
+        """Falls back to [lore] when no [liblore] subsection for lore.kernel.org."""
+        legacy_cfg: dict[str, str | list[str]] = {
+            'fallback': ['https://sea.lore.kernel.org'],
+            'autoprobe': 'true',
+        }
+
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value=legacy_cfg):
+            node = LoreNode.from_git_config()
+
+        assert node._all_origins == [
+            'https://sea.lore.kernel.org',
+            'https://lore.kernel.org',
+        ]
+        assert node._auto_probe is True
+
+    def test_no_fallback_to_lore_for_non_lore_url(self) -> None:
+        """Non-lore URLs do NOT fall back to [lore] section."""
+        legacy_cfg: dict[str, str | list[str]] = {
+            'fallback': ['https://tor.lore.kernel.org'],
+            'autoprobe': 'true',
+        }
+
+        with patch('liblore.node._get_subsection_config', return_value={}), \
+             patch('liblore.node._get_config_from_git', return_value=legacy_cfg) as mock_legacy:
+            node = LoreNode.from_git_config(
+                url='https://subspace.kernel.org/_lists/helpdesk',
+            )
+
+        # Should have NO fallbacks — [lore] mirrors don't serve subspace
+        assert node._all_origins == ['https://subspace.kernel.org']
+        assert node._auto_probe is False
+        # [lore] must not be consulted for non-lore URLs
+        mock_legacy.assert_not_called()
+
+    def test_non_lore_url_with_own_subsection(self) -> None:
+        """Non-lore URLs use their own [liblore "<origin>"] section."""
+        subsection_cfg: dict[str, str | list[str]] = {
+            'fallback': ['https://subspace-mirror.kernel.org'],
+            'useragentplus': 'subspace-token',
+        }
+
+        with patch('liblore.node._get_subsection_config', return_value=subsection_cfg), \
+             patch('liblore.node._get_config_from_git') as mock_legacy:
+            node = LoreNode.from_git_config(
+                url='https://subspace.kernel.org/_lists/helpdesk',
+            )
+
+        assert node._all_origins == [
+            'https://subspace-mirror.kernel.org',
+            'https://subspace.kernel.org',
+        ]
+        assert node._user_agent_plus == 'subspace-token'
+        mock_legacy.assert_not_called()
+
+    def test_subsection_overrides_lore_section(self) -> None:
+        """[liblore "https://lore.kernel.org"] takes precedence over [lore]."""
+        subsection_cfg: dict[str, str | list[str]] = {
+            'fallback': ['https://preferred-mirror.example.com'],
+            'useragentplus': 'new-uuid',
+        }
+        legacy_cfg: dict[str, str | list[str]] = {
+            'fallback': ['https://old-mirror.example.com'],
+            'useragentplus': 'old-uuid',
+        }
+
+        with patch('liblore.node._get_subsection_config', return_value=subsection_cfg), \
+             patch('liblore.node._get_config_from_git', return_value=legacy_cfg) as mock_legacy:
+            node = LoreNode.from_git_config()
+
+        # Subsection wins
+        assert node._all_origins == [
+            'https://preferred-mirror.example.com',
+            'https://lore.kernel.org',
+        ]
+        assert node._user_agent_plus == 'new-uuid'
+        # Legacy not even consulted
+        mock_legacy.assert_not_called()
+
+    def test_explicit_kwargs_override_subsection(self) -> None:
+        """Explicit kwargs still take precedence over subsection config."""
+        subsection_cfg: dict[str, str | list[str]] = {
+            'fallback': ['https://from-config.example.com'],
+            'autoprobe': 'true',
+        }
+
+        with patch('liblore.node._get_subsection_config', return_value=subsection_cfg):
+            node = LoreNode.from_git_config(
+                fallback_urls=['https://explicit.example.com'],
+                auto_probe=False,
+            )
+
+        assert node._all_origins == [
+            'https://explicit.example.com',
+            'https://lore.kernel.org',
+        ]
+        assert node._auto_probe is False
 
 
 # =====================================================================

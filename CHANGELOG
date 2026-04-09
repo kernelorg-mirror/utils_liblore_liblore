@@ -1,6 +1,19 @@
 CHANGELOG
 =========
 
+v0.7.1 (2026-04-08)
+--------------------
+- Add per-origin git config via [liblore "<origin>"] subsections.
+  from_git_config() now looks for configuration in
+  [liblore "https://lore.kernel.org"] (or whichever origin is passed)
+  before falling back to the legacy [lore] section. The [lore]
+  fallback only applies to lore.kernel.org URLs, so non-lore servers
+  like subspace.kernel.org get independent mirror and probe settings
+  without inheriting lore.kernel.org mirrors. Add new
+  _get_subsection_config() helper that correctly handles dots in
+  subsection names (URLs) by prefix-stripping instead of last-dot
+  splitting.
+
 v0.7.0 (2026-04-08)
 --------------------
 - Add public request() method to LoreNode for making arbitrary HTTP
