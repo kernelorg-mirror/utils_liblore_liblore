@@ -195,7 +195,7 @@ class LoreNode:
         self._authheaders: types.ModuleType | None = None
         if add_auth_headers:
             try:
-                import authheaders
+                import authheaders  # type: ignore[import-untyped]
 
                 self._authheaders = authheaders
             except ImportError:

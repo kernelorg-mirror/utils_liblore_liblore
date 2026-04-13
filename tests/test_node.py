@@ -7,6 +7,7 @@ import gzip
 import os
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from typing import cast
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -25,7 +26,9 @@ class TestSessionManagement:
         node = LoreNode()
         s = node._get_session()
         assert s is not None
-        assert 'liblore/' in s.headers['User-Agent']
+        user_agent = s.headers['User-Agent']
+        assert isinstance(user_agent, str)
+        assert 'liblore/' in user_agent
         node.close()
 
     def test_returns_same_session(self) -> None:
@@ -74,7 +77,9 @@ class TestSessionManagement:
     def test_default_no_plus(self) -> None:
         node = LoreNode()
         s = node._get_session()
-        assert '+' not in s.headers['User-Agent']
+        user_agent = s.headers['User-Agent']
+        assert isinstance(user_agent, str)
+        assert '+' not in user_agent
         node.close()
 
     def test_set_requests_session(self) -> None:
@@ -1008,7 +1013,7 @@ class TestProbeOrigins:
         def fake_head(url: str, **kwargs: object) -> MagicMock:
             headers = kwargs.get('headers', {})
             assert isinstance(headers, dict)
-            captured_headers.append(headers)
+            captured_headers.append(cast(dict[str, str], headers))
             resp = MagicMock()
             resp.status_code = 200
             return resp
