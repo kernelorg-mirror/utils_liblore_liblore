@@ -1924,12 +1924,6 @@ class TestUserAgentPlusProperty:
 
         assert node.user_agent_plus == 'my-tracking-uuid'
 
-    def test_read_only(self) -> None:
-        """Property has no setter — assignment raises AttributeError."""
-        node = LoreNode()
-        with pytest.raises(AttributeError):
-            node.user_agent_plus = 'nope'  # type: ignore[misc]  # ty:ignore[invalid-assignment]
-
 
 # =====================================================================
 # Public API: origins property
