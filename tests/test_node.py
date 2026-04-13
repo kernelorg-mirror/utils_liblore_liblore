@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tests for liblore.node (LoreNode)."""
+
 from __future__ import annotations
 
 import gzip
@@ -17,6 +18,7 @@ from liblore.node import LoreNode
 # =====================================================================
 # Session management
 # =====================================================================
+
 
 class TestSessionManagement:
     def test_creates_session(self) -> None:
@@ -114,6 +116,7 @@ class TestSessionManagement:
 # =====================================================================
 # get_mbox_by_msgid / get_mbox_by_query
 # =====================================================================
+
 
 class TestGetMboxByMsgid:
     def test_returns_raw_bytes(self, sample_mbox: bytes) -> None:
@@ -243,6 +246,7 @@ class TestGetMboxByQuery:
 # get_thread_by_msgid
 # =====================================================================
 
+
 class TestGetThreadByMsgid:
     def test_full_thread(self, sample_mbox: bytes) -> None:
         node = LoreNode('https://lore.kernel.org/all')
@@ -315,6 +319,7 @@ class TestGetThreadByMsgid:
 # get_thread_updates_since
 # =====================================================================
 
+
 class TestGetThreadUpdatesSince:
     def test_returns_messages(self, sample_mbox: bytes) -> None:
         node = LoreNode('https://lore.kernel.org/all')
@@ -370,7 +375,9 @@ class TestGetThreadUpdatesSince:
 
         since = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
         msgs = node.get_thread_updates_since(
-            'first@example.com', since, sort=True,
+            'first@example.com',
+            since,
+            sort=True,
         )
         assert len(msgs) >= 1
 
@@ -390,6 +397,7 @@ class TestGetThreadUpdatesSince:
 # =====================================================================
 # get_thread_by_query
 # =====================================================================
+
 
 class TestGetThreadByQuery:
     def test_posts_query(self, sample_mbox: bytes) -> None:
@@ -423,6 +431,7 @@ class TestGetThreadByQuery:
 # get_message_by_msgid
 # =====================================================================
 
+
 class TestGetMessageByMsgid:
     def test_fetches_raw(self) -> None:
         node = LoreNode('https://lore.kernel.org/all')
@@ -450,6 +459,7 @@ class TestGetMessageByMsgid:
 # =====================================================================
 # batch_get_thread_by_msgid
 # =====================================================================
+
 
 class TestBatchGetThreadByMsgid:
     def test_returns_ordered_results(self) -> None:
@@ -482,11 +492,17 @@ class TestBatchGetThreadByMsgid:
 
         with patch('liblore.node.time.sleep'):
             node.batch_get_thread_by_msgid(
-                ['a@x'], strict=False, sort=True, since='20240101',
+                ['a@x'],
+                strict=False,
+                sort=True,
+                since='20240101',
             )
 
         node.get_thread_by_msgid.assert_called_once_with(
-            'a@x', strict=False, sort=True, since='20240101',
+            'a@x',
+            strict=False,
+            sort=True,
+            since='20240101',
         )
 
     def test_sleep_count_matches_gaps(self) -> None:
@@ -513,6 +529,7 @@ class TestBatchGetThreadByMsgid:
 # =====================================================================
 # batch_get_thread_by_query
 # =====================================================================
+
 
 class TestBatchGetThreadByQuery:
     def test_returns_ordered_results(self) -> None:
@@ -564,6 +581,7 @@ class TestBatchGetThreadByQuery:
 # validate
 # =====================================================================
 
+
 class TestValidate:
     def test_valid_url(self) -> None:
         node = LoreNode('https://lore.kernel.org/lkml')
@@ -602,6 +620,7 @@ class TestValidate:
 # =====================================================================
 # URL fallback
 # =====================================================================
+
 
 class TestFallback:
     """Tests for the fallback_urls feature."""
@@ -807,6 +826,7 @@ class TestFallback:
     def test_invalid_fallback_url_no_scheme(self) -> None:
         """Fallback URL without scheme raises LibloreError."""
         from liblore import LibloreError
+
         with pytest.raises(LibloreError, match='Invalid fallback URL'):
             LoreNode(
                 'https://lore.kernel.org/all',
@@ -816,6 +836,7 @@ class TestFallback:
     def test_invalid_fallback_url_with_path(self) -> None:
         """Fallback URL with a path component raises LibloreError."""
         from liblore import LibloreError
+
         with pytest.raises(LibloreError, match='must be a scheme://host origin'):
             LoreNode(
                 'https://lore.kernel.org/all',
@@ -862,6 +883,7 @@ class TestFallback:
 # =====================================================================
 # Origin probing
 # =====================================================================
+
 
 class TestProbeOrigins:
     """Tests for the probe_origins() fastest-mirror feature."""
@@ -998,7 +1020,8 @@ class TestProbeOrigins:
             assert h['User-Agent'] == 'myapp/1.0'
 
     def test_auto_probe_triggers_on_first_request(
-        self, sample_mbox: bytes,
+        self,
+        sample_mbox: bytes,
     ) -> None:
         """With auto_probe=True, first _request() triggers probe."""
         node = LoreNode(
@@ -1038,6 +1061,7 @@ class TestProbeOrigins:
         node.set_requests_session(mock_session)
 
         probe_count = 0
+
         def fake_head(url: str, **kwargs: object) -> MagicMock:
             nonlocal probe_count
             probe_count += 1
@@ -1105,10 +1129,12 @@ class TestProbeOrigins:
 
         # Backdate cache file to force expiry
         import glob as glob_mod
+
         for f in glob_mod.glob(os.path.join(cache_dir, '*.lore.cache')):
             os.utime(f, (0, 0))
 
         probe_called = False
+
         def fake_head_2(url: str, **kwargs: object) -> MagicMock:
             nonlocal probe_called
             probe_called = True
@@ -1123,7 +1149,8 @@ class TestProbeOrigins:
         assert probe_called
 
     def test_probe_cache_ignored_when_origins_change(
-        self, tmp_path: object,
+        self,
+        tmp_path: object,
     ) -> None:
         """Cache is ignored when the set of origins differs."""
         cache_dir = str(tmp_path)
@@ -1149,6 +1176,7 @@ class TestProbeOrigins:
         )
 
         probe_called = False
+
         def fake_head_2(url: str, **kwargs: object) -> MagicMock:
             nonlocal probe_called
             probe_called = True
@@ -1207,6 +1235,7 @@ class TestProbeOrigins:
 # Git config integration
 # =====================================================================
 
+
 class TestFromGitConfig:
     """Tests for LoreNode.from_git_config() with legacy [lore] section.
 
@@ -1226,8 +1255,10 @@ class TestFromGitConfig:
             'probettl': '7200',
         }
 
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value=gitcfg),
+        ):
             node = LoreNode.from_git_config()
 
         assert node._all_origins == [
@@ -1246,8 +1277,10 @@ class TestFromGitConfig:
             'autoprobe': 'true',
         }
 
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value=gitcfg),
+        ):
             node = LoreNode.from_git_config(
                 fallback_urls=['https://explicit.example.com'],
                 auto_probe=False,
@@ -1261,16 +1294,20 @@ class TestFromGitConfig:
 
     def test_git_not_installed(self) -> None:
         """Works fine when both config helpers return empty."""
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value={}):
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value={}),
+        ):
             node = LoreNode.from_git_config()
 
         assert node._all_origins == ['https://lore.kernel.org']
 
     def test_no_config_keys(self) -> None:
         """Works fine when no lore.* keys exist in git config."""
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value={}):
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value={}),
+        ):
             node = LoreNode.from_git_config()
 
         assert node._all_origins == ['https://lore.kernel.org']
@@ -1280,16 +1317,20 @@ class TestFromGitConfig:
         """Non-numeric lore.probetimeout is silently ignored."""
         gitcfg: dict[str, str | list[str]] = {'probetimeout': 'notanumber'}
 
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value=gitcfg),
+        ):
             node = LoreNode.from_git_config()
 
         assert node._probe_timeout == 5.0  # default
 
     def test_custom_url_passed_through(self) -> None:
         """The url argument is forwarded to __init__."""
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value={}):
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value={}),
+        ):
             node = LoreNode.from_git_config(
                 url='https://my-inbox.example.com/lists',
             )
@@ -1302,8 +1343,10 @@ class TestFromGitConfig:
             'useragentplus': '550e8400-e29b-41d4',
         }
 
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value=gitcfg),
+        ):
             node = LoreNode.from_git_config()
 
         assert node._user_agent_plus == '550e8400-e29b-41d4'
@@ -1317,8 +1360,10 @@ class TestFromGitConfig:
             'useragentplus': 'from-git-config',
         }
 
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value=gitcfg),
+        ):
             node = LoreNode.from_git_config()
 
         node.set_user_agent('myapp', '1.0', plus='explicit')
@@ -1336,8 +1381,10 @@ class TestFromGitConfig:
             'useragentplus': 'myuuid',
         }
 
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value=gitcfg):
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value=gitcfg),
+        ):
             node = LoreNode.from_git_config()
 
         node.set_user_agent('bugspray', '0.3')
@@ -1426,7 +1473,9 @@ class TestGetSubsectionConfig:
         )
         with patch('liblore.node.subprocess.run', return_value=mock_result):
             cfg = _get_subsection_config(
-                'liblore', 'https://lore.kernel.org', multivals=['fallback'],
+                'liblore',
+                'https://lore.kernel.org',
+                multivals=['fallback'],
             )
 
         assert cfg == {
@@ -1444,12 +1493,12 @@ class TestGetSubsectionConfig:
 
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = (
-            'liblore.https://subspace.kernel.org.fallback\nhttps://mirror.example.com\x00'
-        )
+        mock_result.stdout = 'liblore.https://subspace.kernel.org.fallback\nhttps://mirror.example.com\x00'
         with patch('liblore.node.subprocess.run', return_value=mock_result):
             cfg = _get_subsection_config(
-                'liblore', 'https://subspace.kernel.org', multivals=['fallback'],
+                'liblore',
+                'https://subspace.kernel.org',
+                multivals=['fallback'],
             )
 
         assert cfg == {
@@ -1465,7 +1514,8 @@ class TestGetSubsectionConfig:
         mock_result.stdout = ''
         with patch('liblore.node.subprocess.run', return_value=mock_result):
             cfg = _get_subsection_config(
-                'liblore', 'https://nonexistent.example.com',
+                'liblore',
+                'https://nonexistent.example.com',
             )
 
         assert cfg == {}
@@ -1479,7 +1529,8 @@ class TestGetSubsectionConfig:
             side_effect=FileNotFoundError('git not found'),
         ):
             cfg = _get_subsection_config(
-                'liblore', 'https://lore.kernel.org',
+                'liblore',
+                'https://lore.kernel.org',
             )
 
         assert cfg == {}
@@ -1496,8 +1547,10 @@ class TestFromGitConfigSubsections:
             'useragentplus': 'subsection-uuid',
         }
 
-        with patch('liblore.node._get_subsection_config', return_value=subsection_cfg), \
-             patch('liblore.node._get_config_from_git', return_value={}) as mock_legacy:
+        with (
+            patch('liblore.node._get_subsection_config', return_value=subsection_cfg),
+            patch('liblore.node._get_config_from_git', return_value={}) as mock_legacy,
+        ):
             node = LoreNode.from_git_config()
 
         assert node._all_origins == [
@@ -1516,8 +1569,10 @@ class TestFromGitConfigSubsections:
             'autoprobe': 'true',
         }
 
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value=legacy_cfg):
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value=legacy_cfg),
+        ):
             node = LoreNode.from_git_config()
 
         assert node._all_origins == [
@@ -1533,8 +1588,12 @@ class TestFromGitConfigSubsections:
             'autoprobe': 'true',
         }
 
-        with patch('liblore.node._get_subsection_config', return_value={}), \
-             patch('liblore.node._get_config_from_git', return_value=legacy_cfg) as mock_legacy:
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch(
+                'liblore.node._get_config_from_git', return_value=legacy_cfg
+            ) as mock_legacy,
+        ):
             node = LoreNode.from_git_config(
                 url='https://subspace.kernel.org/_lists/helpdesk',
             )
@@ -1552,8 +1611,10 @@ class TestFromGitConfigSubsections:
             'useragentplus': 'subspace-token',
         }
 
-        with patch('liblore.node._get_subsection_config', return_value=subsection_cfg), \
-             patch('liblore.node._get_config_from_git') as mock_legacy:
+        with (
+            patch('liblore.node._get_subsection_config', return_value=subsection_cfg),
+            patch('liblore.node._get_config_from_git') as mock_legacy,
+        ):
             node = LoreNode.from_git_config(
                 url='https://subspace.kernel.org/_lists/helpdesk',
             )
@@ -1576,8 +1637,12 @@ class TestFromGitConfigSubsections:
             'useragentplus': 'old-uuid',
         }
 
-        with patch('liblore.node._get_subsection_config', return_value=subsection_cfg), \
-             patch('liblore.node._get_config_from_git', return_value=legacy_cfg) as mock_legacy:
+        with (
+            patch('liblore.node._get_subsection_config', return_value=subsection_cfg),
+            patch(
+                'liblore.node._get_config_from_git', return_value=legacy_cfg
+            ) as mock_legacy,
+        ):
             node = LoreNode.from_git_config()
 
         # Subsection wins
@@ -1612,6 +1677,7 @@ class TestFromGitConfigSubsections:
 # =====================================================================
 # Public API: request()
 # =====================================================================
+
 
 class TestRequest:
     """Tests for the public request() method."""
@@ -1670,7 +1736,8 @@ class TestRequest:
         node.set_requests_session(mock_session)
 
         node.request(
-            'GET', 'https://lore.kernel.org/manifest.js.gz',
+            'GET',
+            'https://lore.kernel.org/manifest.js.gz',
             timeout=30,
         )
         _, kwargs = mock_session.get.call_args
@@ -1680,6 +1747,7 @@ class TestRequest:
 # =====================================================================
 # Public API: user_agent_plus property
 # =====================================================================
+
 
 class TestUserAgentPlusProperty:
     """Tests for the user_agent_plus read-only property."""
@@ -1709,6 +1777,7 @@ class TestUserAgentPlusProperty:
 # =====================================================================
 # Public API: origins property
 # =====================================================================
+
 
 class TestOriginsProperty:
     """Tests for the origins read-only property."""
@@ -1762,6 +1831,7 @@ class TestOriginsProperty:
 # =====================================================================
 # Public API: canonical_origin property
 # =====================================================================
+
 
 class TestCanonicalOriginProperty:
     """Tests for the canonical_origin read-only property."""

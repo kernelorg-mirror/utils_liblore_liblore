@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tests for LoreNode filesystem caching."""
+
 from __future__ import annotations
 
 import gzip
@@ -82,7 +83,6 @@ class TestCacheReadWrite:
 
 
 class TestClearCache:
-
     def test_clears_cache_files(self, tmp_path: Path) -> None:
         node = LoreNode(cache_dir=str(tmp_path))
         node._cache_write(node._cache_key('a', '1'), b'data1')
@@ -104,7 +104,6 @@ class TestClearCache:
 
 
 class TestProperties:
-
     def test_url_property(self) -> None:
         node = LoreNode('https://lore.kernel.org/all/')
         # Trailing slash is stripped by constructor
@@ -122,8 +121,12 @@ class TestProperties:
 class TestCachedMethods:
     """Integration tests: verify cache hit avoids network, cache miss hits network."""
 
-    def _make_node(self, tmp_path: Path, sample_mbox: bytes) -> tuple[LoreNode, MagicMock]:
-        node = LoreNode('https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60)
+    def _make_node(
+        self, tmp_path: Path, sample_mbox: bytes
+    ) -> tuple[LoreNode, MagicMock]:
+        node = LoreNode(
+            'https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60
+        )
         mock_session = MagicMock()
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -158,7 +161,9 @@ class TestCachedMethods:
         assert mock_session.post.call_count == 2
 
     def test_get_message_by_msgid_caches(self, tmp_path: Path) -> None:
-        node = LoreNode('https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60)
+        node = LoreNode(
+            'https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60
+        )
         mock_session = MagicMock()
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -197,7 +202,9 @@ class TestCachedMethods:
         # tmp_path should be empty since we didn't set cache_dir to it
         assert list(tmp_path.iterdir()) == []
 
-    def test_fetch_thread_since_not_cached(self, tmp_path: Path, sample_mbox: bytes) -> None:
+    def test_fetch_thread_since_not_cached(
+        self, tmp_path: Path, sample_mbox: bytes
+    ) -> None:
         """_fetch_thread_since should NOT be cached."""
         node, mock_session = self._make_node(tmp_path, sample_mbox)
         node._fetch_thread_since('test@example.com', 'dt:20240101..')
@@ -207,7 +214,9 @@ class TestCachedMethods:
 
     def test_error_not_cached(self, tmp_path: Path) -> None:
         """Network errors should not be cached."""
-        node = LoreNode('https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60)
+        node = LoreNode(
+            'https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60
+        )
         mock_session = MagicMock()
         mock_resp = MagicMock()
         mock_resp.status_code = 404

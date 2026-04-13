@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tests for liblore.message."""
+
 from __future__ import annotations
 
 from email.message import EmailMessage

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tests for liblore.email_utils."""
+
 from __future__ import annotations
 
 from email.message import EmailMessage
@@ -98,7 +99,6 @@ class TestMsgGetPayload:
     def test_empty_body(self) -> None:
         msg = EmailMessage(policy=emlpolicy)
         assert msg_get_payload(msg) == ''
-
 
 
 class TestMsgGetRecipients:

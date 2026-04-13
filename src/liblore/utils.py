@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (C) 2025-2026 The Linux Foundation
 """Message parsing, email utilities, threading, and mbox splitting."""
+
 from __future__ import annotations
 
 import datetime
@@ -35,6 +36,7 @@ _GTFROM_RE = re.compile(rb'^>+From ')
 # =====================================================================
 # Header and message-ID utilities
 # =====================================================================
+
 
 def clean_header(hdrval: str | None) -> str:
     """Decode an RFC 2047 encoded header and normalise whitespace.
@@ -166,7 +168,6 @@ def msg_get_payload(
     return '\n'.join(stripped)
 
 
-
 # Adapted from email._parseaddr — RFC 5322 specials that require quoting
 _QSPECIALS = re.compile(r'[()<>@,:;.\"\[\]]')
 
@@ -187,7 +188,11 @@ def format_addrs(pairs: list[tuple[str, str]], clean: bool = True) -> str:
         if clean:
             name = clean_header(name)
         # Work around https://github.com/python/cpython/issues/100900
-        if not name.startswith('=?') and not name.startswith('"') and _QSPECIALS.search(name):
+        if (
+            not name.startswith('=?')
+            and not name.startswith('"')
+            and _QSPECIALS.search(name)
+        ):
             addrs.append(f'"{email.utils.quote(name)}" <{addr}>')
             continue
         if name.isascii():
@@ -216,7 +221,8 @@ def wrap_header(hdr: tuple[str, str], width: int = 75, nl: str = '\n') -> bytes:
         for addr in email.utils.getaddresses([hval]):
             if not addr[0].isascii():
                 enc_name = email.quoprimime.header_encode(
-                    addr[0].encode(), charset='utf-8')
+                    addr[0].encode(), charset='utf-8'
+                )
                 qp = format_addrs([(enc_name, addr[1])], clean=False)
             else:
                 qp = format_addrs([addr], clean=False)
@@ -236,14 +242,19 @@ def wrap_header(hdr: tuple[str, str], width: int = 75, nl: str = '\n') -> bytes:
                 return hdata.encode()
             # Trick: replace ': ' with ':_' so textwrap doesn't break there
             hdata = hdata.replace(': ', ':_', 1)
-            wrapped = textwrap.wrap(hdata, break_long_words=False,
-                                    break_on_hyphens=False,
-                                    subsequent_indent=' ', width=width)
+            wrapped = textwrap.wrap(
+                hdata,
+                break_long_words=False,
+                break_on_hyphens=False,
+                subsequent_indent=' ',
+                width=width,
+            )
             return nl.join(wrapped).replace(':_', ': ', 1).encode()
 
         # Non-ASCII: encode as RFC 2047 quoted-printable
         qp = f'{hname}: ' + email.quoprimime.header_encode(
-            hval.encode(), charset='utf-8')
+            hval.encode(), charset='utf-8'
+        )
         if len(qp) <= width:
             return qp.encode()
 
@@ -252,7 +263,7 @@ def wrap_header(hdr: tuple[str, str], width: int = 75, nl: str = '\n') -> bytes:
             if len(_parts):
                 wrapat -= 1
             # Don't break in the middle of a =XX escape sequence
-            while '=' in qp[wrapat - 2:wrapat]:
+            while '=' in qp[wrapat - 2 : wrapat]:
                 wrapat -= 1
             _parts.append(qp[:wrapat] + '?=')
             qp = '=?utf-8?q?' + qp[wrapat:]
@@ -434,8 +445,14 @@ DIFFSTAT_RE = re.compile(r'^\s*\d+ file.*changed', re.M)
 
 # Default set of headers to keep when minimizing messages.
 MINIMIZE_KEEP_HEADERS: tuple[str, ...] = (
-    'From', 'To', 'Cc', 'Subject', 'Date',
-    'Message-ID', 'Reply-To', 'In-Reply-To',
+    'From',
+    'To',
+    'Cc',
+    'Subject',
+    'Date',
+    'Message-ID',
+    'Reply-To',
+    'In-Reply-To',
 )
 
 
@@ -481,7 +498,11 @@ def minimize_thread(
 
         body = msg_get_payload(msg, strip_signature=False)
 
-        if not re.search(r'^>', body, re.M) or DIFF_RE.search(body) or DIFFSTAT_RE.search(body):
+        if (
+            not re.search(r'^>', body, re.M)
+            or DIFF_RE.search(body)
+            or DIFFSTAT_RE.search(body)
+        ):
             mmsg.set_payload(body, charset='utf-8')
             mmsgs.append(mmsg)
             continue
@@ -548,11 +569,15 @@ def minimize_thread(
                 skipped = last_break
                 if skipped <= 5:
                     continue
-                last_para = qchunk[last_break + 1:]
-                chunks[idx] = (True, [
-                    f'> [... skip {skipped} lines ...]',
-                    '>',
-                ] + last_para)
+                last_para = qchunk[last_break + 1 :]
+                chunks[idx] = (
+                    True,
+                    [
+                        f'> [... skip {skipped} lines ...]',
+                        '>',
+                    ]
+                    + last_para,
+                )
 
         parts: list[str] = []
         for _quoted, chunk in chunks:
@@ -599,7 +624,7 @@ def _get_raw_header(raw: bytes, name: str) -> str | None:
         if value is not None:
             break
         if line.lower().startswith(prefix):
-            value = line[len(prefix):].strip()
+            value = line[len(prefix) :].strip()
 
     if value is not None:
         return value.decode('ascii', errors='replace')
@@ -680,7 +705,8 @@ DEFAULT_LISTID_PREFERENCE: list[str] = [
 
 
 def _listid_preference_index(
-    listid: str | None, listid_preference: list[str],
+    listid: str | None,
+    listid_preference: list[str],
 ) -> int:
     """Return the preference index for a List-Id value.
 
@@ -716,16 +742,17 @@ def get_preferred_duplicate(
     if listid_preference is None:
         listid_preference = DEFAULT_LISTID_PREFERENCE
 
-    idx1 = _listid_preference_index(
-        get_clean_msgid(msg1, 'List-Id'), listid_preference)
-    idx2 = _listid_preference_index(
-        get_clean_msgid(msg2, 'List-Id'), listid_preference)
+    idx1 = _listid_preference_index(get_clean_msgid(msg1, 'List-Id'), listid_preference)
+    idx2 = _listid_preference_index(get_clean_msgid(msg2, 'List-Id'), listid_preference)
     if idx1 <= idx2:
-        logger.debug('Picked duplicate from preferred source: %s',
-                      get_clean_msgid(msg1, 'List-Id'))
+        logger.debug(
+            'Picked duplicate from preferred source: %s',
+            get_clean_msgid(msg1, 'List-Id'),
+        )
         return msg1
-    logger.debug('Picked duplicate from preferred source: %s',
-                  get_clean_msgid(msg2, 'List-Id'))
+    logger.debug(
+        'Picked duplicate from preferred source: %s', get_clean_msgid(msg2, 'List-Id')
+    )
     return msg2
 
 
@@ -799,8 +826,9 @@ def split_and_dedupe(
 
 
 # =====================================================================
-# Pure helpers 
+# Pure helpers
 # =====================================================================
+
 
 def get_msgid_from_url(url: str) -> str:
     """Extract a message ID from a lore.kernel.org URL.
@@ -809,7 +837,9 @@ def get_msgid_from_url(url: str) -> str:
     returned with angle brackets stripped.
     """
     if '://' in url:
-        matches = re.search(r'^https?://[^@]+/([^/]+(?:@|%40)[^/]+)', url, re.IGNORECASE)
+        matches = re.search(
+            r'^https?://[^@]+/([^/]+(?:@|%40)[^/]+)', url, re.IGNORECASE
+        )
         if matches:
             return urllib.parse.unquote(matches.groups()[0])
     return url.strip('<>')

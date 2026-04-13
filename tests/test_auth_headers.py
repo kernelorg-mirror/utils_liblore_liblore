@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tests for optional authheaders integration in LoreNode."""
+
 from __future__ import annotations
 
 import gzip
@@ -16,6 +17,7 @@ from liblore.node import LoreNode
 # =====================================================================
 # Import-time validation
 # =====================================================================
+
 
 class TestAuthHeadersImport:
     def test_raises_when_authheaders_missing(self) -> None:
@@ -40,6 +42,7 @@ class TestAuthHeadersImport:
 # =====================================================================
 # _authenticate_msgs
 # =====================================================================
+
 
 class TestAuthenticateMsgs:
     def test_noop_when_disabled(self) -> None:
@@ -115,6 +118,7 @@ class TestAuthenticateMsgs:
 # =====================================================================
 # Integration with fetch methods
 # =====================================================================
+
 
 class TestAuthInFetchMethods:
     @pytest.fixture()

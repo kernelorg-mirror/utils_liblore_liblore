@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Shared fixtures for liblore tests."""
+
 from __future__ import annotations
 
 import email.utils

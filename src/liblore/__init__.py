@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (C) 2025-2026 The Linux Foundation
 """liblore — shared library for public-inbox / lore.kernel.org access."""
+
 import email.charset
 import email.policy
 from email.message import EmailMessage

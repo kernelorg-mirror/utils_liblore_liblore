@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (C) 2025-2026 The Linux Foundation
 """LoreNode — primary API for interacting with public-inbox servers."""
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -49,7 +50,9 @@ def _get_config_from_git(
     try:
         result = subprocess.run(
             ['git', 'config', '-z', '--get-regexp', regexp],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode != 0:
             return {}
@@ -99,7 +102,9 @@ def _get_subsection_config(
     try:
         result = subprocess.run(
             ['git', 'config', '-z', '--get-regexp', f'^{escaped}'],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode != 0:
             return {}
@@ -114,7 +119,7 @@ def _get_subsection_config(
             key, value = entry.split('\n', 1)
         else:
             key, value = entry, 'true'
-        varname = key[len(prefix):].lower()
+        varname = key[len(prefix) :].lower()
         if varname in multivals:
             existing = config.get(varname)
             if not isinstance(existing, list):
@@ -168,7 +173,7 @@ class LoreNode:
 
         # Build the ordered list of origins to try
         self._all_origins: list[str] = []
-        for fb in (fallback_urls or []):
+        for fb in fallback_urls or []:
             fb = fb.rstrip('/')
             fb_parsed = urllib.parse.urlparse(fb)
             if not fb_parsed.scheme or not fb_parsed.netloc:
@@ -191,6 +196,7 @@ class LoreNode:
         if add_auth_headers:
             try:
                 import authheaders
+
                 self._authheaders = authheaders
             except ImportError:
                 raise LibloreError(
@@ -280,7 +286,9 @@ class LoreNode:
         # Try [liblore "<origin>"] first, fall back to [lore] for
         # lore.kernel.org.
         gitcfg = _get_subsection_config(
-            'liblore', origin, multivals=['fallback'],
+            'liblore',
+            origin,
+            multivals=['fallback'],
         )
         if not gitcfg and parsed.netloc == 'lore.kernel.org':
             gitcfg = _get_config_from_git(r'^lore\.', multivals=['fallback'])
@@ -334,7 +342,9 @@ class LoreNode:
         """
         return self._user_agent_plus
 
-    def set_user_agent(self, app_name: str, version: str, plus: str | None = None) -> None:
+    def set_user_agent(
+        self, app_name: str, version: str, plus: str | None = None
+    ) -> None:
         """Set the User-Agent to ``app_name/version`` (optionally ``+plus``).
 
         When *plus* is not provided, the value from ``lore.useragentplus``
@@ -415,7 +425,7 @@ class LoreNode:
 
     def _rewrite_url(self, url: str, origin: str) -> str:
         """Replace the canonical origin in *url* with *origin*."""
-        return origin + url[len(self._canonical_origin):]
+        return origin + url[len(self._canonical_origin) :]
 
     def _probe_cache_key(self) -> str:
         """Cache key for probe results, stable regardless of current order."""
@@ -596,12 +606,14 @@ class LoreNode:
             logger.debug('Trying %s %s', method, request_url)
             try:
                 resp: requests.Response = getattr(
-                    session, method.lower(),
+                    session,
+                    method.lower(),
                 )(request_url, **kwargs)
             except (requests.ConnectionError, requests.Timeout) as exc:
                 logger.warning(
                     'Request to %s failed (%s), trying next host',
-                    origin, exc,
+                    origin,
+                    exc,
                 )
                 last_exc = exc
                 continue
@@ -609,7 +621,8 @@ class LoreNode:
             if resp.status_code >= 500:
                 logger.warning(
                     'Request to %s returned %d, trying next host',
-                    origin, resp.status_code,
+                    origin,
+                    resp.status_code,
                 )
                 last_resp = resp
                 continue
@@ -622,9 +635,7 @@ class LoreNode:
             return last_resp
 
         if last_exc is not None:
-            raise RemoteError(
-                f'All hosts failed for {url}: {last_exc}'
-            ) from last_exc
+            raise RemoteError(f'All hosts failed for {url}: {last_exc}') from last_exc
 
         # last_resp must be a 5xx from the final origin
         assert last_resp is not None
@@ -650,7 +661,9 @@ class LoreNode:
             return None
         age = int(time.time() - st.st_mtime)
         if age > self._cache_ttl:
-            logger.debug('Cache expired (%ds > %ds): %s', age, self._cache_ttl, key[:12])
+            logger.debug(
+                'Cache expired (%ds > %ds): %s', age, self._cache_ttl, key[:12]
+            )
             try:
                 os.unlink(path)
             except OSError:
@@ -699,8 +712,12 @@ class LoreNode:
         for msg in msgs:
             msg_bytes = msg.as_bytes()
             auth_result = self._authheaders.authenticate_message(
-                msg_bytes, 'liblore',
-                dkim=True, dmarc=True, arc=True, spf=False,
+                msg_bytes,
+                'liblore',
+                dkim=True,
+                dmarc=True,
+                arc=True,
+                spf=False,
             )
             if auth_result:
                 # authheaders returns the full header line, so strip
@@ -785,7 +802,9 @@ class LoreNode:
                 return cached
 
         t_param = '&t=1' if full_threads else ''
-        query_url = self._url + '/?x=m' + t_param + '&q=' + urllib.parse.quote_plus(query)
+        query_url = (
+            self._url + '/?x=m' + t_param + '&q=' + urllib.parse.quote_plus(query)
+        )
         resp = self._request('POST', query_url, data='x=m')
         if resp.status_code != 200:
             raise RemoteError('Server returned an error: %s' % resp.status_code)
@@ -842,9 +861,7 @@ class LoreNode:
         if strict:
             strict_msgs = get_strict_thread(msgs, msgid)
             if not isinstance(strict_msgs, list) or not len(strict_msgs):
-                raise LookupError(
-                    'No messages found for msgid=%s' % msgid
-                )
+                raise LookupError('No messages found for msgid=%s' % msgid)
             msgs = strict_msgs
 
         if sort:
@@ -1013,9 +1030,7 @@ class LoreNode:
         for i, query in enumerate(queries):
             if i > 0:
                 time.sleep(0.1)
-            results.append(
-                self.get_thread_by_query(query, full_threads=full_threads)
-            )
+            results.append(self.get_thread_by_query(query, full_threads=full_threads))
         return results
 
     def validate(self) -> None:

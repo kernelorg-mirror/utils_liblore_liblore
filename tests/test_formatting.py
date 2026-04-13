@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tests for email formatting and thread minimization."""
+
 from __future__ import annotations
 
 from email.message import EmailMessage
@@ -19,105 +20,168 @@ from liblore.utils import (
 # Adapted from b4 test_format_addrs — validates cpython#100900 workaround
 # and RFC 2047 handling in address formatting.
 class TestFormatAddrs:
-    @pytest.mark.parametrize('pairs,verify,clean', [
-        ([('', 'foo@example.com'), ('Foo Bar', 'bar@example.com')],
-         'foo@example.com, Foo Bar <bar@example.com>', True),
-        ([('', 'foo@example.com'), ('Foo, Bar', 'bar@example.com')],
-         'foo@example.com, "Foo, Bar" <bar@example.com>', True),
-        ([('', 'foo@example.com'), ('F\u00f4o, Bar', 'bar@example.com')],
-         'foo@example.com, "F\u00f4o, Bar" <bar@example.com>', True),
-        ([('', 'foo@example.com'), ('=?utf-8?q?Qu=C3=BBx_Foo?=', 'quux@example.com')],
-         'foo@example.com, Qu\u00fbx Foo <quux@example.com>', True),
-        ([('', 'foo@example.com'), ('=?utf-8?q?Qu=C3=BBx=2C_Foo?=', 'quux@example.com')],
-         'foo@example.com, "Qu\u00fbx, Foo" <quux@example.com>', True),
-        ([('', 'foo@example.com'), ('=?utf-8?q?Qu=C3=BBx=2C_Foo?=', 'quux@example.com')],
-         'foo@example.com, =?utf-8?q?Qu=C3=BBx=2C_Foo?= <quux@example.com>', False),
-    ])
-    def test_format_addrs(self, pairs: list[tuple[str, str]],
-                          verify: str, clean: bool) -> None:
+    @pytest.mark.parametrize(
+        'pairs,verify,clean',
+        [
+            (
+                [('', 'foo@example.com'), ('Foo Bar', 'bar@example.com')],
+                'foo@example.com, Foo Bar <bar@example.com>',
+                True,
+            ),
+            (
+                [('', 'foo@example.com'), ('Foo, Bar', 'bar@example.com')],
+                'foo@example.com, "Foo, Bar" <bar@example.com>',
+                True,
+            ),
+            (
+                [('', 'foo@example.com'), ('F\u00f4o, Bar', 'bar@example.com')],
+                'foo@example.com, "F\u00f4o, Bar" <bar@example.com>',
+                True,
+            ),
+            (
+                [
+                    ('', 'foo@example.com'),
+                    ('=?utf-8?q?Qu=C3=BBx_Foo?=', 'quux@example.com'),
+                ],
+                'foo@example.com, Qu\u00fbx Foo <quux@example.com>',
+                True,
+            ),
+            (
+                [
+                    ('', 'foo@example.com'),
+                    ('=?utf-8?q?Qu=C3=BBx=2C_Foo?=', 'quux@example.com'),
+                ],
+                'foo@example.com, "Qu\u00fbx, Foo" <quux@example.com>',
+                True,
+            ),
+            (
+                [
+                    ('', 'foo@example.com'),
+                    ('=?utf-8?q?Qu=C3=BBx=2C_Foo?=', 'quux@example.com'),
+                ],
+                'foo@example.com, =?utf-8?q?Qu=C3=BBx=2C_Foo?= <quux@example.com>',
+                False,
+            ),
+        ],
+    )
+    def test_format_addrs(
+        self, pairs: list[tuple[str, str]], verify: str, clean: bool
+    ) -> None:
         assert format_addrs(pairs, clean) == verify
 
 
 # Adapted from b4 test_header_wrapping — validates RFC 2047 encoding,
 # line wrapping, and proper handling of address vs non-address headers.
 class TestWrapHeader:
-    @pytest.mark.parametrize('hval,verify', [
-        # Short ASCII — no wrapping needed
-        ('short-ascii', 'short-ascii'),
-        # Short Unicode — RFC 2047 QP encoded
-        ('short-unic\u00f4de', '=?utf-8?q?short-unic=C3=B4de?='),
-        # Long ASCII — wrapped at word boundary
-        ('Lorem ipsum dolor sit amet consectetur adipiscing elit '
-         'sed do eiusmod tempor incididunt ut labore et dolore magna aliqua',
-         'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do\n'
-         ' eiusmod tempor incididunt ut labore et dolore magna aliqua'),
-        # Long Unicode — split across multiple encoded lines
-        ('Lorem \u00eepsum dolor sit amet consectetur adipiscing el\u00eet '
-         'sed do eiusmod temp\u00f4r incididunt ut labore et dol\u00f4re magna aliqua',
-         '=?utf-8?q?Lorem_=C3=AEpsum_dolor_sit_amet_consectetur_adipiscin?=\n'
-         ' =?utf-8?q?g_el=C3=AEt_sed_do_eiusmod_temp=C3=B4r_incididunt_ut_labore_et?=\n'
-         ' =?utf-8?q?_dol=C3=B4re_magna_aliqua?='),
-        # Exactly 75 chars — boundary condition
-        ('Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiu',
-         'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiu'),
-        # Unicode on escape boundary
-        ('Lorem ipsum dolor sit amet consectetur adipiscin el\u00eet',
-         '=?utf-8?q?Lorem_ipsum_dolor_sit_amet_consectetur_adipiscin_el?=\n'
-         ' =?utf-8?q?=C3=AEt?='),
-        # Unicode 1 char too long
-        ('Lorem ipsum dolor sit amet consectetur adipi el\u00eet',
-         '=?utf-8?q?Lorem_ipsum_dolor_sit_amet_consectetur_adipi_el=C3=AE?=\n'
-         ' =?utf-8?q?t?='),
-    ])
+    @pytest.mark.parametrize(
+        'hval,verify',
+        [
+            # Short ASCII — no wrapping needed
+            ('short-ascii', 'short-ascii'),
+            # Short Unicode — RFC 2047 QP encoded
+            ('short-unic\u00f4de', '=?utf-8?q?short-unic=C3=B4de?='),
+            # Long ASCII — wrapped at word boundary
+            (
+                'Lorem ipsum dolor sit amet consectetur adipiscing elit '
+                'sed do eiusmod tempor incididunt ut labore et dolore magna aliqua',
+                'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do\n'
+                ' eiusmod tempor incididunt ut labore et dolore magna aliqua',
+            ),
+            # Long Unicode — split across multiple encoded lines
+            (
+                'Lorem \u00eepsum dolor sit amet consectetur adipiscing el\u00eet '
+                'sed do eiusmod temp\u00f4r incididunt ut labore et dol\u00f4re magna aliqua',
+                '=?utf-8?q?Lorem_=C3=AEpsum_dolor_sit_amet_consectetur_adipiscin?=\n'
+                ' =?utf-8?q?g_el=C3=AEt_sed_do_eiusmod_temp=C3=B4r_incididunt_ut_labore_et?=\n'
+                ' =?utf-8?q?_dol=C3=B4re_magna_aliqua?=',
+            ),
+            # Exactly 75 chars — boundary condition
+            (
+                'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiu',
+                'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiu',
+            ),
+            # Unicode on escape boundary
+            (
+                'Lorem ipsum dolor sit amet consectetur adipiscin el\u00eet',
+                '=?utf-8?q?Lorem_ipsum_dolor_sit_amet_consectetur_adipiscin_el?=\n'
+                ' =?utf-8?q?=C3=AEt?=',
+            ),
+            # Unicode 1 char too long
+            (
+                'Lorem ipsum dolor sit amet consectetur adipi el\u00eet',
+                '=?utf-8?q?Lorem_ipsum_dolor_sit_amet_consectetur_adipi_el=C3=AE?=\n'
+                ' =?utf-8?q?t?=',
+            ),
+        ],
+    )
     def test_non_address_header(self, hval: str, verify: str) -> None:
         wrapped = wrap_header(('X-Header', hval))
         assert wrapped.decode() == f'X-Header: {verify}'
 
-    @pytest.mark.parametrize('hval,verify', [
-        # Single address
-        ('foo@example.com', 'foo@example.com'),
-        # Two addresses
-        ('foo@example.com, bar@example.com',
-         'foo@example.com, bar@example.com'),
-        # Mixed plain + display name
-        ('foo@example.com, Foo Bar <bar@example.com>',
-         'foo@example.com, Foo Bar <bar@example.com>'),
-        # Mixed Unicode — non-ASCII name gets QP encoded
-        ('foo@example.com, Foo Bar <bar@example.com>, F\u00f4o Baz <baz@example.com>',
-         'foo@example.com, Foo Bar <bar@example.com>, \n'
-         ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>'),
-        # Complex with quoted specials
-        ('foo@example.com, Foo Bar <bar@example.com>, '
-         'F\u00f4o Baz <baz@example.com>, "Quux, Foo" <quux@example.com>',
-         'foo@example.com, Foo Bar <bar@example.com>, \n'
-         ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>, '
-         '"Quux, Foo" <quux@example.com>'),
-        # Long local part forces line wrap
-        ('01234567890123456789012345678901234567890123456789012345678901@example.org, '
-         '\u00e4 <foo@example.org>',
-         '01234567890123456789012345678901234567890123456789012345678901@example.org, \n'
-         ' =?utf-8?q?=C3=A4?= <foo@example.org>'),
-        # cpython#100900 — Unicode name with RFC 5322 specials
-        ('foo@example.com, Foo Bar <bar@example.com>, '
-         'F\u00f4o Baz <baz@example.com>, "Qu\u00fbx, Foo" <quux@example.com>',
-         'foo@example.com, Foo Bar <bar@example.com>, \n'
-         ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>, \n'
-         ' =?utf-8?q?Qu=C3=BBx=2C_Foo?= <quux@example.com>'),
-    ])
+    @pytest.mark.parametrize(
+        'hval,verify',
+        [
+            # Single address
+            ('foo@example.com', 'foo@example.com'),
+            # Two addresses
+            ('foo@example.com, bar@example.com', 'foo@example.com, bar@example.com'),
+            # Mixed plain + display name
+            (
+                'foo@example.com, Foo Bar <bar@example.com>',
+                'foo@example.com, Foo Bar <bar@example.com>',
+            ),
+            # Mixed Unicode — non-ASCII name gets QP encoded
+            (
+                'foo@example.com, Foo Bar <bar@example.com>, F\u00f4o Baz <baz@example.com>',
+                'foo@example.com, Foo Bar <bar@example.com>, \n'
+                ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>',
+            ),
+            # Complex with quoted specials
+            (
+                'foo@example.com, Foo Bar <bar@example.com>, '
+                'F\u00f4o Baz <baz@example.com>, "Quux, Foo" <quux@example.com>',
+                'foo@example.com, Foo Bar <bar@example.com>, \n'
+                ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>, '
+                '"Quux, Foo" <quux@example.com>',
+            ),
+            # Long local part forces line wrap
+            (
+                '01234567890123456789012345678901234567890123456789012345678901@example.org, '
+                '\u00e4 <foo@example.org>',
+                '01234567890123456789012345678901234567890123456789012345678901@example.org, \n'
+                ' =?utf-8?q?=C3=A4?= <foo@example.org>',
+            ),
+            # cpython#100900 — Unicode name with RFC 5322 specials
+            (
+                'foo@example.com, Foo Bar <bar@example.com>, '
+                'F\u00f4o Baz <baz@example.com>, "Qu\u00fbx, Foo" <quux@example.com>',
+                'foo@example.com, Foo Bar <bar@example.com>, \n'
+                ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>, \n'
+                ' =?utf-8?q?Qu=C3=BBx=2C_Foo?= <quux@example.com>',
+            ),
+        ],
+    )
     def test_address_header(self, hval: str, verify: str) -> None:
         wrapped = wrap_header(('To', hval))
         assert wrapped.decode() == f'To: {verify}'
 
-    @pytest.mark.parametrize('hval,verify', [
-        # Short message-id
-        ('<20240319-short-message-id@example.com>',
-         '<20240319-short-message-id@example.com>'),
-        # Long message-id — unbreakable, stays on one line
-        ('<20240319-very-long-message-id-that-spans-multiple-lines-for-sure'
-         '-because-longer-than-75-characters-abcde123456@longdomain.example.com>',
-         '<20240319-very-long-message-id-that-spans-multiple-lines-for-sure'
-         '-because-longer-than-75-characters-abcde123456@longdomain.example.com>'),
-    ])
+    @pytest.mark.parametrize(
+        'hval,verify',
+        [
+            # Short message-id
+            (
+                '<20240319-short-message-id@example.com>',
+                '<20240319-short-message-id@example.com>',
+            ),
+            # Long message-id — unbreakable, stays on one line
+            (
+                '<20240319-very-long-message-id-that-spans-multiple-lines-for-sure'
+                '-because-longer-than-75-characters-abcde123456@longdomain.example.com>',
+                '<20240319-very-long-message-id-that-spans-multiple-lines-for-sure'
+                '-because-longer-than-75-characters-abcde123456@longdomain.example.com>',
+            ),
+        ],
+    )
     def test_message_id(self, hval: str, verify: str) -> None:
         wrapped = wrap_header(('Message-ID', hval))
         assert wrapped.decode() == f'Message-ID: {verify}'
@@ -203,8 +267,9 @@ class TestMinimizeThread:
 
     def test_custom_keep_headers(self, make_msg: MsgFactory) -> None:
         """Callers can override which headers to keep."""
-        msg = make_msg(subject='Test', body='Hello.\n',
-                              date='Mon, 01 Jan 2024 00:00:00 +0000')
+        msg = make_msg(
+            subject='Test', body='Hello.\n', date='Mon, 01 Jan 2024 00:00:00 +0000'
+        )
         result = minimize_thread([msg], keep_headers=('Subject',))
         assert len(result) == 1
         assert result[0]['Subject'] == 'Test'
@@ -329,15 +394,11 @@ class TestMinimizeThread:
         assert 'Second paragraph' not in text
         assert 'My reply here.' in text
 
-    def test_reduce_quote_context_short_quote_untouched(self, make_msg: MsgFactory) -> None:
+    def test_reduce_quote_context_short_quote_untouched(
+        self, make_msg: MsgFactory
+    ) -> None:
         """Quotes with 5 or fewer skippable lines are left alone."""
-        body = (
-            '> Line one.\n'
-            '> Line two.\n'
-            '>\n'
-            '> Last para.\n'
-            'Reply.\n'
-        )
+        body = '> Line one.\n> Line two.\n>\n> Last para.\nReply.\n'
         msg = make_msg(body=body)
         result = minimize_thread([msg], reduce_quote_context=True)
         text = result[0].get_payload()
