@@ -3,7 +3,6 @@
 """liblore — shared library for public-inbox / lore.kernel.org access."""
 import email.charset
 import email.policy
-
 from email.message import EmailMessage
 
 __version__ = '0.7.1'

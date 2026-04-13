@@ -16,7 +16,6 @@ from liblore.utils import (
 )
 
 
-
 class TestMsgGetSubject:
     def test_plain_subject(self, make_msg: MsgFactory) -> None:
         msg = make_msg(subject='Just a plain subject')

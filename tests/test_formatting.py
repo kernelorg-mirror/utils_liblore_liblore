@@ -2,10 +2,9 @@
 """Tests for email formatting and thread minimization."""
 from __future__ import annotations
 
-import pytest
-
 from email.message import EmailMessage
 
+import pytest
 from conftest import MsgFactory
 
 from liblore.utils import (

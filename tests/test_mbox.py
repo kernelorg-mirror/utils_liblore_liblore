@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import textwrap
-
 from email.message import EmailMessage
 
+from liblore import emlpolicy
 from liblore.utils import (
     get_clean_msgid,
     get_preferred_duplicate,
@@ -14,8 +14,6 @@ from liblore.utils import (
     split_mbox,
     split_mbox_as_bytes,
 )
-
-from liblore import emlpolicy
 
 
 class TestSplitMbox:

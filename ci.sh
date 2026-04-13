@@ -2,5 +2,6 @@
 
 set -eu
 
+uv run ruff check
 uv run mypy .
 uv run pytest --durations=0

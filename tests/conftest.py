@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import email.utils
 import textwrap
+from email.message import EmailMessage
 from typing import Protocol
 
 import pytest
-
-from email.message import EmailMessage
 
 from liblore import emlpolicy
 

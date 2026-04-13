@@ -15,10 +15,9 @@ import time
 import types
 import urllib.parse
 from datetime import datetime, timezone
+from email.message import EmailMessage
 
 import requests
-
-from email.message import EmailMessage
 
 from liblore import LibloreError, RemoteError
 from liblore.utils import (

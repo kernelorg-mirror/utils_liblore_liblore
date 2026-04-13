@@ -13,7 +13,6 @@ import pytest
 from liblore import LibloreError
 from liblore.node import LoreNode
 
-
 # =====================================================================
 # Import-time validation
 # =====================================================================

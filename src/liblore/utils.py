@@ -3,7 +3,6 @@
 """Message parsing, email utilities, threading, and mbox splitting."""
 from __future__ import annotations
 
-from collections.abc import Sequence
 import datetime
 import email.header
 import email.parser
@@ -14,7 +13,7 @@ import logging
 import re
 import textwrap
 import urllib.parse
-
+from collections.abc import Sequence
 from email.message import EmailMessage
 
 from liblore import emlpolicy

@@ -14,7 +14,6 @@ import requests
 from liblore import RemoteError
 from liblore.node import LoreNode
 
-
 # =====================================================================
 # Session management
 # =====================================================================
