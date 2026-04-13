@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 import requests
 import responses
+from typing_extensions import override
 
 from liblore import RemoteError
 from liblore.node import LoreNode
@@ -496,24 +497,38 @@ class TestGetMessageByMsgid:
 
 
 class TestBatchGetThreadByMsgid:
+    class _Node(LoreNode):
+        def __init__(self, results: list[list[EmailMessage]]) -> None:
+            super().__init__()
+            self.calls: list[tuple[str, bool, bool, str | None]] = []
+            self._results = results
+
+        @override
+        def get_thread_by_msgid(
+            self,
+            msgid: str,
+            *,
+            strict: bool = True,
+            sort: bool = False,
+            since: str | None = None,
+        ) -> list[EmailMessage]:
+            self.calls.append((msgid, strict, sort, since))
+            return self._results.pop(0)
+
     def test_returns_ordered_results(self) -> None:
-        node = LoreNode()
         thread_a = [EmailMessage()]
         thread_b = [EmailMessage(), EmailMessage()]
-        node.get_thread_by_msgid = MagicMock(side_effect=[thread_a, thread_b])  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
-
+        node = self._Node([thread_a, thread_b])
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_msgid(['a@x', 'b@x'])
 
         assert results == [thread_a, thread_b]
-        assert node.get_thread_by_msgid.call_count == 2  # ty:ignore[unresolved-attribute]
+        assert len(node.calls) == 2
         mock_sleep.assert_called_once_with(0.1)
 
     def test_no_sleep_for_single_msgid(self) -> None:
-        node = LoreNode()
         thread = [EmailMessage()]
-        node.get_thread_by_msgid = MagicMock(return_value=thread)  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
-
+        node = self._Node([thread])
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_msgid(['only@x'])
 
@@ -521,9 +536,7 @@ class TestBatchGetThreadByMsgid:
         mock_sleep.assert_not_called()
 
     def test_passes_kwargs(self) -> None:
-        node = LoreNode()
-        node.get_thread_by_msgid = MagicMock(return_value=[EmailMessage()])  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
-
+        node = self._Node([[EmailMessage()]])
         with patch('liblore.node.time.sleep'):
             node.batch_get_thread_by_msgid(
                 ['a@x'],
@@ -532,32 +545,23 @@ class TestBatchGetThreadByMsgid:
                 since='20240101',
             )
 
-        node.get_thread_by_msgid.assert_called_once_with(  # ty:ignore[unresolved-attribute]
-            'a@x',
-            strict=False,
-            sort=True,
-            since='20240101',
-        )
+        assert node.calls == [('a@x', False, True, '20240101')]
 
     def test_sleep_count_matches_gaps(self) -> None:
-        node = LoreNode()
-        node.get_thread_by_msgid = MagicMock(return_value=[EmailMessage()])  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
-
+        node = self._Node([[EmailMessage()], [EmailMessage()], [EmailMessage()]])
         with patch('liblore.node.time.sleep') as mock_sleep:
             node.batch_get_thread_by_msgid(['a@x', 'b@x', 'c@x'])
 
         assert mock_sleep.call_args_list == [call(0.1), call(0.1)]
 
     def test_empty_list(self) -> None:
-        node = LoreNode()
-        node.get_thread_by_msgid = MagicMock()  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
-
+        node = self._Node([])
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_msgid([])
 
         assert results == []
         mock_sleep.assert_not_called()
-        node.get_thread_by_msgid.assert_not_called()  # ty:ignore[unresolved-attribute]
+        assert node.calls == []
 
 
 # =====================================================================
@@ -566,24 +570,36 @@ class TestBatchGetThreadByMsgid:
 
 
 class TestBatchGetThreadByQuery:
+    class _Node(LoreNode):
+        def __init__(self, results: list[list[EmailMessage]]) -> None:
+            super().__init__()
+            self.calls: list[tuple[str, bool]] = []
+            self._results = results
+
+        @override
+        def get_thread_by_query(
+            self,
+            query: str,
+            *,
+            full_threads: bool = False,
+        ) -> list[EmailMessage]:
+            self.calls.append((query, full_threads))
+            return self._results.pop(0)
+
     def test_returns_ordered_results(self) -> None:
-        node = LoreNode()
         result_a = [EmailMessage()]
         result_b = [EmailMessage(), EmailMessage()]
-        node.get_thread_by_query = MagicMock(side_effect=[result_a, result_b])  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
-
+        node = self._Node([result_a, result_b])
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_query(['q1', 'q2'])
 
         assert results == [result_a, result_b]
-        assert node.get_thread_by_query.call_count == 2  # ty:ignore[unresolved-attribute]
+        assert len(node.calls) == 2
         mock_sleep.assert_called_once_with(0.1)
 
     def test_no_sleep_for_single_query(self) -> None:
-        node = LoreNode()
         result = [EmailMessage()]
-        node.get_thread_by_query = MagicMock(return_value=result)  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
-
+        node = self._Node([result])
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_query(['only_query'])
 
@@ -591,24 +607,22 @@ class TestBatchGetThreadByQuery:
         mock_sleep.assert_not_called()
 
     def test_sleep_count_matches_gaps(self) -> None:
-        node = LoreNode()
-        node.get_thread_by_query = MagicMock(return_value=[EmailMessage()])  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
-
+        node = self._Node(
+            [[EmailMessage()], [EmailMessage()], [EmailMessage()], [EmailMessage()]]
+        )
         with patch('liblore.node.time.sleep') as mock_sleep:
             node.batch_get_thread_by_query(['q1', 'q2', 'q3', 'q4'])
 
         assert mock_sleep.call_args_list == [call(0.1), call(0.1), call(0.1)]
 
     def test_empty_list(self) -> None:
-        node = LoreNode()
-        node.get_thread_by_query = MagicMock()  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
-
+        node = self._Node([])
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_query([])
 
         assert results == []
         mock_sleep.assert_not_called()
-        node.get_thread_by_query.assert_not_called()  # ty:ignore[unresolved-attribute]
+        assert node.calls == []
 
 
 # =====================================================================
