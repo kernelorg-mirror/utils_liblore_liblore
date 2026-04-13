@@ -46,6 +46,7 @@ dev = [
     "ruff",
     "ty",
     "types-requests",
+    "typing-extensions",
 ]
 
 [tool.pytest.ini_options]

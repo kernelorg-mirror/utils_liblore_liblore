@@ -17,6 +17,7 @@ import types
 import urllib.parse
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from typing import TYPE_CHECKING, TypedDict
 
 import requests
 
@@ -28,6 +29,19 @@ from liblore.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+
+class _LoreNodeInitKwargs(TypedDict, total=False):
+    fallback_urls: list[str] | None
+    auto_probe: bool
+    probe_timeout: float
+    probe_ttl: int
+    add_auth_headers: bool
+    cache_dir: str | None
+    cache_ttl: int
 
 
 def _get_config_from_git(
@@ -212,7 +226,7 @@ class LoreNode:
     def from_git_config(
         cls,
         url: str = 'https://lore.kernel.org/all',
-        **kwargs: object,
+        **kwargs: Unpack[_LoreNodeInitKwargs],
     ) -> LoreNode:
         """Create a :class:`LoreNode` using settings from git config.
 
@@ -319,7 +333,7 @@ class LoreNode:
                 except ValueError:
                     pass
 
-        node = cls(url, **kwargs)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
+        node = cls(url, **kwargs)
 
         val = gitcfg.get('useragentplus')
         if isinstance(val, str) and val:
