@@ -500,19 +500,19 @@ class TestBatchGetThreadByMsgid:
         node = LoreNode()
         thread_a = [EmailMessage()]
         thread_b = [EmailMessage(), EmailMessage()]
-        node.get_thread_by_msgid = MagicMock(side_effect=[thread_a, thread_b])  # type: ignore[method-assign]
+        node.get_thread_by_msgid = MagicMock(side_effect=[thread_a, thread_b])  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
 
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_msgid(['a@x', 'b@x'])
 
         assert results == [thread_a, thread_b]
-        assert node.get_thread_by_msgid.call_count == 2
+        assert node.get_thread_by_msgid.call_count == 2  # ty:ignore[unresolved-attribute]
         mock_sleep.assert_called_once_with(0.1)
 
     def test_no_sleep_for_single_msgid(self) -> None:
         node = LoreNode()
         thread = [EmailMessage()]
-        node.get_thread_by_msgid = MagicMock(return_value=thread)  # type: ignore[method-assign]
+        node.get_thread_by_msgid = MagicMock(return_value=thread)  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
 
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_msgid(['only@x'])
@@ -522,7 +522,7 @@ class TestBatchGetThreadByMsgid:
 
     def test_passes_kwargs(self) -> None:
         node = LoreNode()
-        node.get_thread_by_msgid = MagicMock(return_value=[EmailMessage()])  # type: ignore[method-assign]
+        node.get_thread_by_msgid = MagicMock(return_value=[EmailMessage()])  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
 
         with patch('liblore.node.time.sleep'):
             node.batch_get_thread_by_msgid(
@@ -532,7 +532,7 @@ class TestBatchGetThreadByMsgid:
                 since='20240101',
             )
 
-        node.get_thread_by_msgid.assert_called_once_with(
+        node.get_thread_by_msgid.assert_called_once_with(  # ty:ignore[unresolved-attribute]
             'a@x',
             strict=False,
             sort=True,
@@ -541,7 +541,7 @@ class TestBatchGetThreadByMsgid:
 
     def test_sleep_count_matches_gaps(self) -> None:
         node = LoreNode()
-        node.get_thread_by_msgid = MagicMock(return_value=[EmailMessage()])  # type: ignore[method-assign]
+        node.get_thread_by_msgid = MagicMock(return_value=[EmailMessage()])  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
 
         with patch('liblore.node.time.sleep') as mock_sleep:
             node.batch_get_thread_by_msgid(['a@x', 'b@x', 'c@x'])
@@ -550,14 +550,14 @@ class TestBatchGetThreadByMsgid:
 
     def test_empty_list(self) -> None:
         node = LoreNode()
-        node.get_thread_by_msgid = MagicMock()  # type: ignore[method-assign]
+        node.get_thread_by_msgid = MagicMock()  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
 
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_msgid([])
 
         assert results == []
         mock_sleep.assert_not_called()
-        node.get_thread_by_msgid.assert_not_called()
+        node.get_thread_by_msgid.assert_not_called()  # ty:ignore[unresolved-attribute]
 
 
 # =====================================================================
@@ -570,19 +570,19 @@ class TestBatchGetThreadByQuery:
         node = LoreNode()
         result_a = [EmailMessage()]
         result_b = [EmailMessage(), EmailMessage()]
-        node.get_thread_by_query = MagicMock(side_effect=[result_a, result_b])  # type: ignore[method-assign]
+        node.get_thread_by_query = MagicMock(side_effect=[result_a, result_b])  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
 
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_query(['q1', 'q2'])
 
         assert results == [result_a, result_b]
-        assert node.get_thread_by_query.call_count == 2
+        assert node.get_thread_by_query.call_count == 2  # ty:ignore[unresolved-attribute]
         mock_sleep.assert_called_once_with(0.1)
 
     def test_no_sleep_for_single_query(self) -> None:
         node = LoreNode()
         result = [EmailMessage()]
-        node.get_thread_by_query = MagicMock(return_value=result)  # type: ignore[method-assign]
+        node.get_thread_by_query = MagicMock(return_value=result)  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
 
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_query(['only_query'])
@@ -592,7 +592,7 @@ class TestBatchGetThreadByQuery:
 
     def test_sleep_count_matches_gaps(self) -> None:
         node = LoreNode()
-        node.get_thread_by_query = MagicMock(return_value=[EmailMessage()])  # type: ignore[method-assign]
+        node.get_thread_by_query = MagicMock(return_value=[EmailMessage()])  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
 
         with patch('liblore.node.time.sleep') as mock_sleep:
             node.batch_get_thread_by_query(['q1', 'q2', 'q3', 'q4'])
@@ -601,14 +601,14 @@ class TestBatchGetThreadByQuery:
 
     def test_empty_list(self) -> None:
         node = LoreNode()
-        node.get_thread_by_query = MagicMock()  # type: ignore[method-assign]
+        node.get_thread_by_query = MagicMock()  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
 
         with patch('liblore.node.time.sleep') as mock_sleep:
             results = node.batch_get_thread_by_query([])
 
         assert results == []
         mock_sleep.assert_not_called()
-        node.get_thread_by_query.assert_not_called()
+        node.get_thread_by_query.assert_not_called()  # ty:ignore[unresolved-attribute]
 
 
 # =====================================================================
@@ -1928,7 +1928,7 @@ class TestUserAgentPlusProperty:
         """Property has no setter — assignment raises AttributeError."""
         node = LoreNode()
         with pytest.raises(AttributeError):
-            node.user_agent_plus = 'nope'  # type: ignore[misc]
+            node.user_agent_plus = 'nope'  # type: ignore[misc]  # ty:ignore[invalid-assignment]
 
 
 # =====================================================================

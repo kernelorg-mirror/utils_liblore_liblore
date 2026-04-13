@@ -319,7 +319,7 @@ class LoreNode:
                 except ValueError:
                     pass
 
-        node = cls(url, **kwargs)  # type: ignore[arg-type]
+        node = cls(url, **kwargs)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
 
         val = gitcfg.get('useragentplus')
         if isinstance(val, str) and val:
