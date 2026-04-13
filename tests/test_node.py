@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import gzip
 import os
+import subprocess
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from unittest.mock import MagicMock, call, patch
@@ -1557,15 +1558,17 @@ class TestGetConfigFromGit:
         """Parses git config -z output correctly."""
         from liblore.node import _get_config_from_git
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = (
-            'lore.fallback\nhttps://tor.lore.kernel.org\x00'
-            'lore.fallback\nhttps://sea.lore.kernel.org\x00'
-            'lore.autoprobe\ntrue\x00'
-            'lore.probettl\n7200\x00'
+        result = subprocess.CompletedProcess[str](
+            args=['git'],
+            returncode=0,
+            stdout=(
+                'lore.fallback\nhttps://tor.lore.kernel.org\x00'
+                'lore.fallback\nhttps://sea.lore.kernel.org\x00'
+                'lore.autoprobe\ntrue\x00'
+                'lore.probettl\n7200\x00'
+            ),
         )
-        with patch('liblore.node.subprocess.run', return_value=mock_result):
+        with patch('liblore.node.subprocess.run', return_value=result):
             cfg = _get_config_from_git(r'^lore\.', multivals=['fallback'])
 
         assert cfg == {
@@ -1593,10 +1596,12 @@ class TestGetConfigFromGit:
         """Returns empty dict when no keys match the regexp."""
         from liblore.node import _get_config_from_git
 
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ''
-        with patch('liblore.node.subprocess.run', return_value=mock_result):
+        result = subprocess.CompletedProcess[str](
+            args=['git'],
+            returncode=1,
+            stdout='',
+        )
+        with patch('liblore.node.subprocess.run', return_value=result):
             cfg = _get_config_from_git(r'^lore\.')
 
         assert cfg == {}
@@ -1605,10 +1610,12 @@ class TestGetConfigFromGit:
         """A key without a value (no newline) defaults to 'true'."""
         from liblore.node import _get_config_from_git
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = 'lore.autoprobe\x00'
-        with patch('liblore.node.subprocess.run', return_value=mock_result):
+        result = subprocess.CompletedProcess[str](
+            args=['git'],
+            returncode=0,
+            stdout='lore.autoprobe\x00',
+        )
+        with patch('liblore.node.subprocess.run', return_value=result):
             cfg = _get_config_from_git(r'^lore\.')
 
         assert cfg == {'autoprobe': 'true'}
@@ -1621,15 +1628,17 @@ class TestGetSubsectionConfig:
         """Parses keys from [liblore "https://lore.kernel.org"]."""
         from liblore.node import _get_subsection_config
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = (
-            'liblore.https://lore.kernel.org.fallback\nhttps://tor.lore.kernel.org\x00'
-            'liblore.https://lore.kernel.org.fallback\nhttps://sea.lore.kernel.org\x00'
-            'liblore.https://lore.kernel.org.autoprobe\ntrue\x00'
-            'liblore.https://lore.kernel.org.useragentplus\nmyuuid\x00'
+        result = subprocess.CompletedProcess[str](
+            args=['git'],
+            returncode=0,
+            stdout=(
+                'liblore.https://lore.kernel.org.fallback\nhttps://tor.lore.kernel.org\x00'
+                'liblore.https://lore.kernel.org.fallback\nhttps://sea.lore.kernel.org\x00'
+                'liblore.https://lore.kernel.org.autoprobe\ntrue\x00'
+                'liblore.https://lore.kernel.org.useragentplus\nmyuuid\x00'
+            ),
         )
-        with patch('liblore.node.subprocess.run', return_value=mock_result):
+        with patch('liblore.node.subprocess.run', return_value=result):
             cfg = _get_subsection_config(
                 'liblore',
                 'https://lore.kernel.org',
@@ -1649,10 +1658,12 @@ class TestGetSubsectionConfig:
         """Subsection names with dots (URLs) are parsed correctly."""
         from liblore.node import _get_subsection_config
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = 'liblore.https://subspace.kernel.org.fallback\nhttps://mirror.example.com\x00'
-        with patch('liblore.node.subprocess.run', return_value=mock_result):
+        result = subprocess.CompletedProcess[str](
+            args=['git'],
+            returncode=0,
+            stdout='liblore.https://subspace.kernel.org.fallback\nhttps://mirror.example.com\x00',
+        )
+        with patch('liblore.node.subprocess.run', return_value=result):
             cfg = _get_subsection_config(
                 'liblore',
                 'https://subspace.kernel.org',
@@ -1667,10 +1678,12 @@ class TestGetSubsectionConfig:
         """Returns empty dict when no keys match the subsection."""
         from liblore.node import _get_subsection_config
 
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ''
-        with patch('liblore.node.subprocess.run', return_value=mock_result):
+        result = subprocess.CompletedProcess[str](
+            args=['git'],
+            returncode=1,
+            stdout='',
+        )
+        with patch('liblore.node.subprocess.run', return_value=result):
             cfg = _get_subsection_config(
                 'liblore',
                 'https://nonexistent.example.com',
