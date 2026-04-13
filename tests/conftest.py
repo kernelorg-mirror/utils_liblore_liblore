@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import email.utils
 import textwrap
+from typing import Protocol
 
 import pytest
 
@@ -12,41 +13,51 @@ from email.message import EmailMessage
 from liblore import emlpolicy
 
 
+class MsgFactory(Protocol):
+    def __call__(
+        self,
+        subject: str = ...,
+        from_addr: tuple[str, str] = ...,
+        msgid: str | None = ...,
+        in_reply_to: str | None = ...,
+        references: list[str] | None = ...,
+        body: str = ...,
+        date: str | None = ...,
+    ) -> EmailMessage: ...
+
+
 @pytest.fixture()
-def make_msg() -> type:
-    """Factory fixture that returns a helper class for building test messages."""
+def make_msg() -> MsgFactory:
+    """Factory fixture that returns a helper callable for test messages."""
+    counter = 0
 
-    class MsgFactory:
-        _counter = 0
+    def create(
+        subject: str = 'Test message',
+        from_addr: tuple[str, str] = ('Test User', 'test@example.com'),
+        msgid: str | None = None,
+        in_reply_to: str | None = None,
+        references: list[str] | None = None,
+        body: str = 'Hello, world!\n',
+        date: str | None = None,
+    ) -> EmailMessage:
+        nonlocal counter
+        counter += 1
+        if msgid is None:
+            msgid = f'msg{counter}@example.com'
+        msg = EmailMessage(policy=emlpolicy)
+        msg['Subject'] = subject
+        msg['From'] = email.utils.formataddr(from_addr)
+        msg['Message-Id'] = f'<{msgid}>'
+        if in_reply_to:
+            msg['In-Reply-To'] = f'<{in_reply_to}>'
+        if references:
+            msg['References'] = ' '.join(f'<{r}>' for r in references)
+        if date:
+            msg['Date'] = date
+        msg.set_content(body)
+        return msg
 
-        @classmethod
-        def create(
-            cls,
-            subject: str = 'Test message',
-            from_addr: tuple[str, str] = ('Test User', 'test@example.com'),
-            msgid: str | None = None,
-            in_reply_to: str | None = None,
-            references: list[str] | None = None,
-            body: str = 'Hello, world!\n',
-            date: str | None = None,
-        ) -> EmailMessage:
-            cls._counter += 1
-            if msgid is None:
-                msgid = f'msg{cls._counter}@example.com'
-            msg = EmailMessage(policy=emlpolicy)
-            msg['Subject'] = subject
-            msg['From'] = email.utils.formataddr(from_addr)
-            msg['Message-Id'] = f'<{msgid}>'
-            if in_reply_to:
-                msg['In-Reply-To'] = f'<{in_reply_to}>'
-            if references:
-                msg['References'] = ' '.join(f'<{r}>' for r in references)
-            if date:
-                msg['Date'] = date
-            msg.set_content(body)
-            return msg
-
-    return MsgFactory
+    return create
 
 
 @pytest.fixture()

@@ -67,8 +67,8 @@ class TestAuthenticateMsgs:
             assert msg['Authentication-Results'] == (
                 'liblore; dkim=pass header.d=example.com'
             )
-            fake.authenticate_message.assert_called_once()  # type: ignore[attr-defined]
-            call_kwargs = fake.authenticate_message.call_args  # type: ignore[attr-defined]
+            fake.authenticate_message.assert_called_once()
+            call_kwargs = fake.authenticate_message.call_args
             assert call_kwargs[0][1] == 'liblore'
             assert call_kwargs[1]['dkim'] is True
             assert call_kwargs[1]['dmarc'] is True

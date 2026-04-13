@@ -6,6 +6,8 @@ import pytest
 
 from email.message import EmailMessage
 
+from conftest import MsgFactory
+
 from liblore.utils import (
     clean_header,
     format_addrs,
@@ -165,9 +167,9 @@ class TestGetMsgAsBytes:
 
 
 class TestMinimizeThread:
-    def test_headers_filtered(self, make_msg: type) -> None:
+    def test_headers_filtered(self, make_msg: MsgFactory) -> None:
         """Only headers in MINIMIZE_KEEP_HEADERS are kept."""
-        msg = make_msg.create(subject='Test', body='Hello.\n')
+        msg = make_msg(subject='Test', body='Hello.\n')
         msg['X-Custom'] = 'should be dropped'
         msg['List-Id'] = '<test.example.com>'
         result = minimize_thread([msg])
@@ -176,9 +178,9 @@ class TestMinimizeThread:
         assert result[0]['X-Custom'] is None
         assert result[0]['List-Id'] is None
 
-    def test_keep_headers_default(self, make_msg: type) -> None:
+    def test_keep_headers_default(self, make_msg: MsgFactory) -> None:
         """All default MINIMIZE_KEEP_HEADERS are preserved when present."""
-        msg = make_msg.create(
+        msg = make_msg(
             subject='Test',
             from_addr=('Alice', 'alice@example.com'),
             body='Hello.\n',
@@ -200,9 +202,9 @@ class TestMinimizeThread:
         assert mmsg['Reply-To'] is not None
         assert mmsg['In-Reply-To'] is not None
 
-    def test_custom_keep_headers(self, make_msg: type) -> None:
+    def test_custom_keep_headers(self, make_msg: MsgFactory) -> None:
         """Callers can override which headers to keep."""
-        msg = make_msg.create(subject='Test', body='Hello.\n',
+        msg = make_msg(subject='Test', body='Hello.\n',
                               date='Mon, 01 Jan 2024 00:00:00 +0000')
         result = minimize_thread([msg], keep_headers=('Subject',))
         assert len(result) == 1
@@ -210,10 +212,10 @@ class TestMinimizeThread:
         assert result[0]['From'] is None
         assert result[0]['Date'] is None
 
-    def test_multi_level_quotes_stripped(self, make_msg: type) -> None:
+    def test_multi_level_quotes_stripped(self, make_msg: MsgFactory) -> None:
         """Lines with >> (multi-level quoting) are removed."""
         body = 'My reply.\n> Single quote.\n>> Double quote.\nMore text.\n'
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg])
         assert len(result) == 1
         text = result[0].get_payload()
@@ -222,26 +224,26 @@ class TestMinimizeThread:
         assert 'Double quote.' not in text
         assert 'More text.' in text
 
-    def test_empty_quote_lines_stripped(self, make_msg: type) -> None:
+    def test_empty_quote_lines_stripped(self, make_msg: MsgFactory) -> None:
         """Bare '>' lines are cleaned up."""
         body = 'Reply.\n>\n> Real quote.\nMore text.\n'
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg])
         text = result[0].get_payload()
         assert 'Reply.' in text
         assert 'Real quote.' in text
         assert 'More text.' in text
 
-    def test_bottom_quotes_dropped(self, make_msg: type) -> None:
+    def test_bottom_quotes_dropped(self, make_msg: MsgFactory) -> None:
         """Trailing quoted blocks at the end of a message are dropped."""
         body = 'My reply.\n> Original message.\n'
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg])
         text = result[0].get_payload()
         assert 'My reply.' in text
         assert 'Original message.' not in text
 
-    def test_diff_preserved(self, make_msg: type) -> None:
+    def test_diff_preserved(self, make_msg: MsgFactory) -> None:
         """Messages with diff content are not minimized."""
         body = (
             '> Quoted context.\n'
@@ -252,42 +254,42 @@ class TestMinimizeThread:
             '-old\n'
             '+new\n'
         )
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg])
         text = result[0].get_payload()
         assert 'diff --git' in text
         assert 'Quoted context.' in text
 
-    def test_diffstat_preserved(self, make_msg: type) -> None:
+    def test_diffstat_preserved(self, make_msg: MsgFactory) -> None:
         """Messages with diffstat content are not minimized."""
         body = '> Quoted.\n 3 files changed, 10 insertions(+), 5 deletions(-)\n'
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg])
         text = result[0].get_payload()
         assert 'Quoted.' in text
         assert '3 files changed' in text
 
-    def test_empty_after_minimize_dropped(self, make_msg: type) -> None:
+    def test_empty_after_minimize_dropped(self, make_msg: MsgFactory) -> None:
         """Messages that become empty after minimization are dropped."""
         body = '> Only quoted text.\n>> And deeper quotes.\n'
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg])
         assert len(result) == 0
 
-    def test_signature_preserved(self, make_msg: type) -> None:
+    def test_signature_preserved(self, make_msg: MsgFactory) -> None:
         """Compliant signatures are kept after quote processing."""
         body = 'My reply.\n-- \nJane Doe\n'
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg])
         text = result[0].get_payload()
         assert 'My reply.' in text
         assert '-- \n' in text
         assert 'Jane Doe' in text
 
-    def test_trailing_quote_before_sig_dropped(self, make_msg: type) -> None:
+    def test_trailing_quote_before_sig_dropped(self, make_msg: MsgFactory) -> None:
         """A trailing quoted block before a signature is dropped."""
         body = 'My reply.\n> Huge quoted original.\n> More quoting.\n-- \nJane Doe\n'
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg])
         text = result[0].get_payload()
         assert 'My reply.' in text
@@ -295,14 +297,14 @@ class TestMinimizeThread:
         assert 'More quoting.' not in text
         assert 'Jane Doe' in text
 
-    def test_only_quotes_before_sig_dropped(self, make_msg: type) -> None:
+    def test_only_quotes_before_sig_dropped(self, make_msg: MsgFactory) -> None:
         """Message with only quotes before a signature is dropped entirely."""
         body = '> Only quoted text.\n-- \nJane Doe\n'
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg])
         assert len(result) == 0
 
-    def test_reduce_quote_context(self, make_msg: type) -> None:
+    def test_reduce_quote_context(self, make_msg: MsgFactory) -> None:
         """Long quoted blocks are reduced to the last paragraph."""
         body = (
             'On Monday, Julius Caesar wrote:\n'
@@ -318,7 +320,7 @@ class TestMinimizeThread:
             '> Third paragraph line two.\n'
             'My reply here.\n'
         )
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg], reduce_quote_context=True)
         text = result[0].get_payload()
         assert '... skip 7 lines ...' in text
@@ -328,7 +330,7 @@ class TestMinimizeThread:
         assert 'Second paragraph' not in text
         assert 'My reply here.' in text
 
-    def test_reduce_quote_context_short_quote_untouched(self, make_msg: type) -> None:
+    def test_reduce_quote_context_short_quote_untouched(self, make_msg: MsgFactory) -> None:
         """Quotes with 5 or fewer skippable lines are left alone."""
         body = (
             '> Line one.\n'
@@ -337,29 +339,29 @@ class TestMinimizeThread:
             '> Last para.\n'
             'Reply.\n'
         )
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg], reduce_quote_context=True)
         text = result[0].get_payload()
         assert 'skip' not in text
         assert 'Line one.' in text
         assert 'Last para.' in text
 
-    def test_reduce_quote_context_off_by_default(self, make_msg: type) -> None:
+    def test_reduce_quote_context_off_by_default(self, make_msg: MsgFactory) -> None:
         """Long quotes are untouched when reduce_quote_context is False."""
         lines = ''.join(f'> Line {i}.\n' for i in range(20))
         body = f'{lines}Reply.\n'
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg])
         text = result[0].get_payload()
         assert 'skip' not in text
         assert 'Line 0.' in text
         assert 'Line 19.' in text
 
-    def test_reduce_quote_context_preserves_sig(self, make_msg: type) -> None:
+    def test_reduce_quote_context_preserves_sig(self, make_msg: MsgFactory) -> None:
         """Signature is preserved when reducing quote context."""
         lines = ''.join(f'> Line {i}.\n' for i in range(10))
         body = f'On Monday, someone wrote:\n{lines}>\n> Last para.\nReply.\n-- \nKR\n'
-        msg = make_msg.create(body=body)
+        msg = make_msg(body=body)
         result = minimize_thread([msg], reduce_quote_context=True)
         text = result[0].get_payload()
         assert 'skip' in text
@@ -368,11 +370,11 @@ class TestMinimizeThread:
         assert '-- \n' in text
         assert 'KR' in text
 
-    def test_multiple_messages(self, make_msg: type) -> None:
+    def test_multiple_messages(self, make_msg: MsgFactory) -> None:
         """Multiple messages in a thread are all processed."""
-        msg1 = make_msg.create(body='First message.\n')
-        msg2 = make_msg.create(body='Reply.\n> First message.\n')
-        msg3 = make_msg.create(body='> Only quotes.\n')
+        msg1 = make_msg(body='First message.\n')
+        msg2 = make_msg(body='Reply.\n> First message.\n')
+        msg3 = make_msg(body='> Only quotes.\n')
         result = minimize_thread([msg1, msg2, msg3])
         # msg3 should be dropped (all quotes)
         assert len(result) == 2

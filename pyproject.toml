@@ -57,18 +57,5 @@ strict = true
 module = "authheaders"
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-module = [
-    "test_email_utils",
-    "test_formatting",
-    "test_message",
-    "test_thread",
-]
-disable_error_code = ["attr-defined"]
-
-[[tool.mypy.overrides]]
-module = "test_auth_headers"
-disable_error_code = ["unused-ignore"]
-
 [tool.ruff]
 target-version = "py39"
