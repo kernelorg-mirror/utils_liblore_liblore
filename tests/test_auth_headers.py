@@ -14,7 +14,12 @@ import pytest
 import responses
 
 from liblore import LibloreError
-from liblore.node import LoreNode
+from liblore.node import LoreNode, _AuthenticateMessage
+
+
+class _FakeAuthHeaders(ModuleType):
+    authenticate_message: _AuthenticateMessage
+
 
 # =====================================================================
 # Import-time validation
@@ -28,16 +33,16 @@ class TestAuthHeadersImport:
                 LoreNode(add_auth_headers=True)
 
     def test_ok_when_authheaders_installed(self) -> None:
-        fake = ModuleType('authheaders')
-        fake.authenticate_message = MagicMock()  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
+        fake = _FakeAuthHeaders('authheaders')
+        fake.authenticate_message = MagicMock()
         with patch.dict(sys.modules, {'authheaders': fake}):
             node = LoreNode(add_auth_headers=True)
-            assert node._authheaders is not None
+            assert node._authenticate_message is not None
             node.close()
 
     def test_default_is_disabled(self) -> None:
         node = LoreNode()
-        assert node._authheaders is None
+        assert node._authenticate_message is None
         node.close()
 
 
@@ -55,8 +60,8 @@ class TestAuthenticateMsgs:
         assert 'Authentication-Results' not in msg
 
     def test_adds_header_when_enabled(self) -> None:
-        fake = ModuleType('authheaders')
-        fake.authenticate_message = MagicMock(  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
+        fake = _FakeAuthHeaders('authheaders')
+        fake.authenticate_message = MagicMock(
             return_value='Authentication-Results: liblore; dkim=pass header.d=example.com',
         )
         with patch.dict(sys.modules, {'authheaders': fake}):
@@ -81,8 +86,8 @@ class TestAuthenticateMsgs:
             node.close()
 
     def test_skips_empty_result(self) -> None:
-        fake = ModuleType('authheaders')
-        fake.authenticate_message = MagicMock(return_value='')  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
+        fake = _FakeAuthHeaders('authheaders')
+        fake.authenticate_message = MagicMock(return_value='')
         with patch.dict(sys.modules, {'authheaders': fake}):
             node = LoreNode(add_auth_headers=True)
             msg = EmailMessage()
@@ -94,8 +99,8 @@ class TestAuthenticateMsgs:
             node.close()
 
     def test_multiple_messages(self) -> None:
-        fake = ModuleType('authheaders')
-        fake.authenticate_message = MagicMock(  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
+        fake = _FakeAuthHeaders('authheaders')
+        fake.authenticate_message = MagicMock(
             side_effect=[
                 'liblore; dkim=pass',
                 'Authentication-Results: liblore; dkim=fail',
@@ -125,8 +130,8 @@ class TestAuthenticateMsgs:
 class TestAuthInFetchMethods:
     @pytest.fixture()
     def auth_node(self) -> Iterator[tuple[LoreNode, responses.RequestsMock]]:
-        fake = ModuleType('authheaders')
-        fake.authenticate_message = MagicMock(  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
+        fake = _FakeAuthHeaders('authheaders')
+        fake.authenticate_message = MagicMock(
             return_value='Authentication-Results: liblore; dkim=pass',
         )
         with patch.dict(sys.modules, {'authheaders': fake}):

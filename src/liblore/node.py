@@ -13,11 +13,10 @@ import os
 import re
 import subprocess
 import time
-import types
 import urllib.parse
 from datetime import datetime, timezone
 from email.message import EmailMessage
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Protocol, TypedDict
 
 import requests
 
@@ -42,6 +41,19 @@ class _LoreNodeInitKwargs(TypedDict, total=False):
     add_auth_headers: bool
     cache_dir: str | None
     cache_ttl: int
+
+
+class _AuthenticateMessage(Protocol):
+    def __call__(
+        self,
+        msg: bytes,
+        authserv_id: str,
+        *,
+        dkim: bool = ...,
+        dmarc: bool = ...,
+        arc: bool = ...,
+        spf: bool = ...,
+    ) -> str: ...
 
 
 def _get_config_from_git(
@@ -206,12 +218,12 @@ class LoreNode:
 
         if cache_dir is not None:
             os.makedirs(cache_dir, exist_ok=True)
-        self._authheaders: types.ModuleType | None = None
+        self._authenticate_message: _AuthenticateMessage | None = None
         if add_auth_headers:
             try:
-                import authheaders  # type: ignore[import-untyped]
+                import authheaders
 
-                self._authheaders = authheaders
+                self._authenticate_message = authheaders.authenticate_message
             except ImportError:
                 raise LibloreError(
                     'authheaders library is required for add_auth_headers. '
@@ -721,11 +733,11 @@ class LoreNode:
 
     def _authenticate_msgs(self, msgs: list[EmailMessage]) -> None:
         """Add Authentication-Results headers via authheaders."""
-        if self._authheaders is None:
+        if self._authenticate_message is None:
             return
         for msg in msgs:
             msg_bytes = msg.as_bytes()
-            auth_result = self._authheaders.authenticate_message(
+            auth_result = self._authenticate_message(
                 msg_bytes,
                 'liblore',
                 dkim=True,
