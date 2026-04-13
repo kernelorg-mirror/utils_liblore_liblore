@@ -7,9 +7,11 @@ import gzip
 import sys
 from email.message import EmailMessage
 from types import ModuleType
+from typing import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
+import responses
 
 from liblore import LibloreError
 from liblore.node import LoreNode
@@ -122,7 +124,7 @@ class TestAuthenticateMsgs:
 
 class TestAuthInFetchMethods:
     @pytest.fixture()
-    def auth_node(self, sample_mbox: bytes) -> LoreNode:
+    def auth_node(self) -> Iterator[tuple[LoreNode, responses.RequestsMock]]:
         fake = ModuleType('authheaders')
         fake.authenticate_message = MagicMock(  # type: ignore[attr-defined]
             return_value='Authentication-Results: liblore; dkim=pass',
@@ -133,26 +135,41 @@ class TestAuthInFetchMethods:
         self._fake = fake
         self._patcher = patch.dict(sys.modules, {'authheaders': fake})
         self._patcher.start()
-
-        mock_session = MagicMock()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = gzip.compress(sample_mbox)
-        mock_session.get.return_value = mock_resp
-        mock_session.post.return_value = mock_resp
-        node.set_requests_session(mock_session)
-        return node
+        with responses.RequestsMock() as rsps:
+            yield node, rsps
 
     def teardown_method(self) -> None:
         if hasattr(self, '_patcher'):
             self._patcher.stop()
 
-    def test_get_thread_by_msgid(self, auth_node: LoreNode) -> None:
-        msgs = auth_node.get_thread_by_msgid('first@example.com')
+    def test_get_thread_by_msgid(
+        self,
+        auth_node: tuple[LoreNode, responses.RequestsMock],
+        sample_mbox: bytes,
+    ) -> None:
+        node, rsps = auth_node
+        rsps.add(
+            responses.GET,
+            'https://lore.kernel.org/all/first%40example.com/t.mbox.gz',
+            body=gzip.compress(sample_mbox),
+            status=200,
+        )
+        msgs = node.get_thread_by_msgid('first@example.com')
         for msg in msgs:
             assert msg['Authentication-Results'] == 'liblore; dkim=pass'
 
-    def test_get_thread_by_query(self, auth_node: LoreNode) -> None:
-        msgs = auth_node.get_thread_by_query('test query')
+    def test_get_thread_by_query(
+        self,
+        auth_node: tuple[LoreNode, responses.RequestsMock],
+        sample_mbox: bytes,
+    ) -> None:
+        node, rsps = auth_node
+        rsps.add(
+            responses.POST,
+            'https://lore.kernel.org/all/?x=m&q=test+query',
+            body=gzip.compress(sample_mbox),
+            status=200,
+        )
+        msgs = node.get_thread_by_query('test query')
         for msg in msgs:
             assert msg['Authentication-Results'] == 'liblore; dkim=pass'

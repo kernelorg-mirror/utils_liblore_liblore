@@ -6,11 +6,18 @@ from __future__ import annotations
 import email.utils
 import textwrap
 from email.message import EmailMessage
-from typing import Protocol
+from typing import Iterator, Protocol
 
 import pytest
+import responses as responses_
 
 from liblore import emlpolicy
+
+
+@pytest.fixture(autouse=True)
+def _block_network() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]
+    with responses_.RequestsMock():
+        yield
 
 
 class MsgFactory(Protocol):
