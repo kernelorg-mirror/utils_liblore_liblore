@@ -37,6 +37,7 @@ Repository = "https://git.kernel.org/pub/scm/utils/liblore/liblore.git"
 
 [dependency-groups]
 dev = [
+    "authheaders>=0.15",
     "build",
     "mypy",
     "pyright",
