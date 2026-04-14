@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tests for liblore.message."""
+
 from __future__ import annotations
 
 from email.message import EmailMessage
+
+from conftest import MsgFactory
 
 from liblore.utils import clean_header, get_clean_msgid, parse_message
 
@@ -35,16 +38,16 @@ class TestCleanHeader:
 
 
 class TestGetCleanMsgid:
-    def test_extracts_msgid(self, make_msg: type) -> None:
-        msg = make_msg.create(msgid='test123@example.com')
+    def test_extracts_msgid(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(msgid='test123@example.com')
         assert get_clean_msgid(msg) == 'test123@example.com'
 
     def test_missing_header(self) -> None:
         msg = EmailMessage()
         assert get_clean_msgid(msg) is None
 
-    def test_custom_header(self, make_msg: type) -> None:
-        msg = make_msg.create(in_reply_to='parent@example.com')
+    def test_custom_header(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(in_reply_to='parent@example.com')
         assert get_clean_msgid(msg, 'In-Reply-To') == 'parent@example.com'
 
 

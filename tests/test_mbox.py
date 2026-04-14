@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tests for liblore.mbox."""
+
 from __future__ import annotations
 
 import textwrap
-
 from email.message import EmailMessage
 
+from liblore import emlpolicy
 from liblore.utils import (
     get_clean_msgid,
     get_preferred_duplicate,
@@ -14,8 +15,6 @@ from liblore.utils import (
     split_mbox,
     split_mbox_as_bytes,
 )
-
-from liblore import emlpolicy
 
 
 class TestSplitMbox:
@@ -178,6 +177,7 @@ class TestSplitMboxAsBytes:
     def test_roundtrip_with_split_mbox(self, sample_mbox: bytes) -> None:
         """split_mbox_as_bytes + parse_message should match split_mbox."""
         from liblore.utils import parse_message
+
         raw_chunks = split_mbox_as_bytes(sample_mbox)
         parsed = split_mbox(sample_mbox)
         assert len(raw_chunks) == len(parsed)
@@ -267,6 +267,7 @@ class TestSplitAndDedupeAsBytes:
     def test_roundtrip_with_split_and_dedupe(self, sample_mbox: bytes) -> None:
         """Parsing the bytes output should match split_and_dedupe."""
         from liblore.utils import parse_message
+
         doubled = sample_mbox + sample_mbox
         chunks = split_and_dedupe_as_bytes(doubled)
         msgs = split_and_dedupe(doubled)

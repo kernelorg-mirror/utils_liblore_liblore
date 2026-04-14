@@ -613,25 +613,28 @@ except LibloreError:
 Install with development dependencies:
 
 ```shell
-pip install -e ".[dev]"
+uv sync --all-extras --all-groups
 ```
 
 Run the test suite:
 
 ```shell
-pytest
+uv run --all-extras --all-groups pytest
 ```
 
 Type checking:
 
 ```shell
-mypy src/liblore/ --strict
+uv run --all-extras --all-groups ty check
+uv run --all-extras --all-groups mypy .
+uv run --all-extras --all-groups pyright
 ```
 
 Linting:
 
 ```shell
-ruff check src/liblore/
+uv run --all-extras --all-groups ruff format --check
+uv run --all-extras --all-groups ruff check
 ```
 
 ## Bug Reports

@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tests for liblore.email_utils."""
+
 from __future__ import annotations
 
 from email.message import EmailMessage
+
+from conftest import MsgFactory
 
 from liblore import emlpolicy
 from liblore.utils import (
@@ -14,45 +17,44 @@ from liblore.utils import (
 )
 
 
-
 class TestMsgGetSubject:
-    def test_plain_subject(self, make_msg: type) -> None:
-        msg = make_msg.create(subject='Just a plain subject')
+    def test_plain_subject(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(subject='Just a plain subject')
         assert msg_get_subject(msg) == 'Just a plain subject'
 
-    def test_no_strip(self, make_msg: type) -> None:
-        msg = make_msg.create(subject='[PATCH v3 2/5] subsys: fix thing')
+    def test_no_strip(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(subject='[PATCH v3 2/5] subsys: fix thing')
         assert msg_get_subject(msg) == '[PATCH v3 2/5] subsys: fix thing'
 
-    def test_strip_patch_prefix(self, make_msg: type) -> None:
-        msg = make_msg.create(subject='[PATCH v3 2/5] subsys: fix thing')
+    def test_strip_patch_prefix(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(subject='[PATCH v3 2/5] subsys: fix thing')
         assert msg_get_subject(msg, strip_prefixes=True) == 'subsys: fix thing'
 
-    def test_strip_re_and_prefix(self, make_msg: type) -> None:
-        msg = make_msg.create(subject='Re: [PATCH] Something cool')
+    def test_strip_re_and_prefix(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(subject='Re: [PATCH] Something cool')
         assert msg_get_subject(msg, strip_prefixes=True) == 'Something cool'
 
-    def test_strip_multiple_prefixes(self, make_msg: type) -> None:
-        msg = make_msg.create(subject='[RFC PATCH v2 0/3] [net-next] New feature')
+    def test_strip_multiple_prefixes(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(subject='[RFC PATCH v2 0/3] [net-next] New feature')
         result = msg_get_subject(msg, strip_prefixes=True)
         assert result == 'New feature'
 
-    def test_strip_aw_prefix(self, make_msg: type) -> None:
-        msg = make_msg.create(subject='Aw: [PATCH] German reply')
+    def test_strip_aw_prefix(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(subject='Aw: [PATCH] German reply')
         assert msg_get_subject(msg, strip_prefixes=True) == 'German reply'
 
     def test_no_subject(self) -> None:
         msg = EmailMessage(policy=emlpolicy)
         assert msg_get_subject(msg) == ''
 
-    def test_strip_no_brackets(self, make_msg: type) -> None:
-        msg = make_msg.create(subject='No brackets here')
+    def test_strip_no_brackets(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(subject='No brackets here')
         assert msg_get_subject(msg, strip_prefixes=True) == 'No brackets here'
 
 
 class TestMsgGetAuthor:
-    def test_normal_from(self, make_msg: type) -> None:
-        msg = make_msg.create(from_addr=('Jane Doe', 'jane@example.com'))
+    def test_normal_from(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(from_addr=('Jane Doe', 'jane@example.com'))
         name, addr = msg_get_author(msg)
         assert name == 'Jane Doe'
         assert addr == 'jane@example.com'
@@ -72,23 +74,23 @@ class TestMsgGetAuthor:
 
 
 class TestMsgGetPayload:
-    def test_plain_body(self, make_msg: type) -> None:
-        msg = make_msg.create(body='This is the body.\n')
+    def test_plain_body(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(body='This is the body.\n')
         assert 'This is the body.' in msg_get_payload(msg)
 
-    def test_strip_signature(self, make_msg: type) -> None:
-        msg = make_msg.create(body='Body text.\n-- \nMy Sig\n')
+    def test_strip_signature(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(body='Body text.\n-- \nMy Sig\n')
         result = msg_get_payload(msg, strip_signature=True)
         assert 'Body text.' in result
         assert 'My Sig' not in result
 
-    def test_keep_signature(self, make_msg: type) -> None:
-        msg = make_msg.create(body='Body text.\n-- \nMy Sig\n')
+    def test_keep_signature(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(body='Body text.\n-- \nMy Sig\n')
         result = msg_get_payload(msg, strip_signature=False)
         assert 'My Sig' in result
 
-    def test_strip_quoted(self, make_msg: type) -> None:
-        msg = make_msg.create(body='My reply.\n> Quoted line.\nMore text.\n')
+    def test_strip_quoted(self, make_msg: MsgFactory) -> None:
+        msg = make_msg(body='My reply.\n> Quoted line.\nMore text.\n')
         result = msg_get_payload(msg, strip_quoted=True)
         assert 'My reply.' in result
         assert 'Quoted line.' not in result
@@ -97,7 +99,6 @@ class TestMsgGetPayload:
     def test_empty_body(self) -> None:
         msg = EmailMessage(policy=emlpolicy)
         assert msg_get_payload(msg) == ''
-
 
 
 class TestMsgGetRecipients:
@@ -118,12 +119,12 @@ class TestMsgGetRecipients:
 
 
 class TestSortMsgsByReceived:
-    def test_sorts_by_date(self, make_msg: type) -> None:
-        msg1 = make_msg.create(
+    def test_sorts_by_date(self, make_msg: MsgFactory) -> None:
+        msg1 = make_msg(
             msgid='older@x.com',
             date='Mon, 01 Jan 2024 00:00:00 +0000',
         )
-        msg2 = make_msg.create(
+        msg2 = make_msg(
             msgid='newer@x.com',
             date='Tue, 02 Jan 2024 00:00:00 +0000',
         )
@@ -132,8 +133,8 @@ class TestSortMsgsByReceived:
         assert result[0]['Message-Id'] == '<older@x.com>'
         assert result[1]['Message-Id'] == '<newer@x.com>'
 
-    def test_skips_dateless(self, make_msg: type) -> None:
-        msg = make_msg.create()
+    def test_skips_dateless(self, make_msg: MsgFactory) -> None:
+        msg = make_msg()
         # No Date header set at all — del it if make_msg added one
         if 'Date' in msg:
             del msg['Date']

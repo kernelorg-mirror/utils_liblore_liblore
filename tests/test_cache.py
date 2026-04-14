@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tests for LoreNode filesystem caching."""
+
 from __future__ import annotations
 
 import gzip
 import os
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
+import responses
 
 from liblore import LoreNode, RemoteError
 
@@ -82,7 +83,6 @@ class TestCacheReadWrite:
 
 
 class TestClearCache:
-
     def test_clears_cache_files(self, tmp_path: Path) -> None:
         node = LoreNode(cache_dir=str(tmp_path))
         node._cache_write(node._cache_key('a', '1'), b'data1')
@@ -104,7 +104,6 @@ class TestClearCache:
 
 
 class TestProperties:
-
     def test_url_property(self) -> None:
         node = LoreNode('https://lore.kernel.org/all/')
         # Trailing slash is stripped by constructor
@@ -122,99 +121,154 @@ class TestProperties:
 class TestCachedMethods:
     """Integration tests: verify cache hit avoids network, cache miss hits network."""
 
-    def _make_node(self, tmp_path: Path, sample_mbox: bytes) -> tuple[LoreNode, MagicMock]:
-        node = LoreNode('https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60)
-        mock_session = MagicMock()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = gzip.compress(sample_mbox)
-        mock_session.get.return_value = mock_resp
-        mock_session.post.return_value = mock_resp
-        node.set_requests_session(mock_session)
-        return node, mock_session
+    def _make_node(self, tmp_path: Path, _sample_mbox: bytes) -> LoreNode:
+        node = LoreNode(
+            'https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60
+        )
+        return node
 
     def test_get_mbox_by_msgid_caches(self, tmp_path: Path, sample_mbox: bytes) -> None:
-        node, mock_session = self._make_node(tmp_path, sample_mbox)
-        result1 = node.get_mbox_by_msgid('test@example.com')
-        result2 = node.get_mbox_by_msgid('test@example.com')
-        assert result1 == result2 == sample_mbox
-        # Network should only be hit once
-        assert mock_session.get.call_count == 1
+        with responses.RequestsMock() as rsps:
+            node = self._make_node(tmp_path, sample_mbox)
+            rsps.add(
+                responses.GET,
+                'https://lore.kernel.org/all/test%40example.com/t.mbox.gz',
+                body=gzip.compress(sample_mbox),
+                status=200,
+            )
+            result1 = node.get_mbox_by_msgid('test@example.com')
+            result2 = node.get_mbox_by_msgid('test@example.com')
+            assert result1 == result2 == sample_mbox
+            # Network should only be hit once
+            assert len(rsps.calls) == 1
 
     def test_get_mbox_by_query_caches(self, tmp_path: Path, sample_mbox: bytes) -> None:
-        node, mock_session = self._make_node(tmp_path, sample_mbox)
-        result1 = node.get_mbox_by_query('test query')
-        result2 = node.get_mbox_by_query('test query')
-        assert result1 == result2 == sample_mbox
-        assert mock_session.post.call_count == 1
+        with responses.RequestsMock() as rsps:
+            node = self._make_node(tmp_path, sample_mbox)
+            rsps.add(
+                responses.POST,
+                'https://lore.kernel.org/all/?x=m&q=test+query',
+                body=gzip.compress(sample_mbox),
+                status=200,
+            )
+            result1 = node.get_mbox_by_query('test query')
+            result2 = node.get_mbox_by_query('test query')
+            assert result1 == result2 == sample_mbox
+            assert len(rsps.calls) == 1
 
     def test_get_mbox_by_query_full_threads_separate_key(
         self, tmp_path: Path, sample_mbox: bytes
     ) -> None:
-        node, mock_session = self._make_node(tmp_path, sample_mbox)
-        node.get_mbox_by_query('test', full_threads=False)
-        node.get_mbox_by_query('test', full_threads=True)
-        # Different full_threads values = different cache keys = two network calls
-        assert mock_session.post.call_count == 2
+        with responses.RequestsMock() as rsps:
+            node = self._make_node(tmp_path, sample_mbox)
+            rsps.add(
+                responses.POST,
+                'https://lore.kernel.org/all/?x=m&q=test',
+                body=gzip.compress(sample_mbox),
+                status=200,
+            )
+            rsps.add(
+                responses.POST,
+                'https://lore.kernel.org/all/?x=m&t=1&q=test',
+                body=gzip.compress(sample_mbox),
+                status=200,
+            )
+            node.get_mbox_by_query('test', full_threads=False)
+            node.get_mbox_by_query('test', full_threads=True)
+            # Different full_threads values = different cache keys = two network calls
+            assert len(rsps.calls) == 2
 
     def test_get_message_by_msgid_caches(self, tmp_path: Path) -> None:
-        node = LoreNode('https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60)
-        mock_session = MagicMock()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b'raw email bytes'
-        mock_resp.raise_for_status = MagicMock()
-        mock_session.get.return_value = mock_resp
-        node.set_requests_session(mock_session)
+        with responses.RequestsMock() as rsps:
+            node = LoreNode(
+                'https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60
+            )
+            rsps.add(
+                responses.GET,
+                'https://lore.kernel.org/all/test%40example.com/raw',
+                body=b'raw email bytes',
+                status=200,
+            )
 
-        result1 = node.get_message_by_msgid('test@example.com')
-        result2 = node.get_message_by_msgid('test@example.com')
-        assert result1 == result2 == b'raw email bytes'
-        assert mock_session.get.call_count == 1
+            result1 = node.get_message_by_msgid('test@example.com')
+            result2 = node.get_message_by_msgid('test@example.com')
+            assert result1 == result2 == b'raw email bytes'
+            assert len(rsps.calls) == 1
 
     def test_cache_expired_refetches(self, tmp_path: Path, sample_mbox: bytes) -> None:
-        node, mock_session = self._make_node(tmp_path, sample_mbox)
-        node._cache_ttl = 1
-        node.get_mbox_by_msgid('test@example.com')
-        assert mock_session.get.call_count == 1
-        # Backdate the cache file
-        for f in tmp_path.glob('*.lore.cache'):
-            os.utime(f, (0, 0))
-        node.get_mbox_by_msgid('test@example.com')
-        assert mock_session.get.call_count == 2
+        with responses.RequestsMock() as rsps:
+            node = self._make_node(tmp_path, sample_mbox)
+            rsps.add(
+                responses.GET,
+                'https://lore.kernel.org/all/test%40example.com/t.mbox.gz',
+                body=gzip.compress(sample_mbox),
+                status=200,
+            )
+            rsps.add(
+                responses.GET,
+                'https://lore.kernel.org/all/test%40example.com/t.mbox.gz',
+                body=gzip.compress(sample_mbox),
+                status=200,
+            )
+            node._cache_ttl = 1
+            node.get_mbox_by_msgid('test@example.com')
+            assert len(rsps.calls) == 1
+            # Backdate the cache file
+            for f in tmp_path.glob('*.lore.cache'):
+                os.utime(f, (0, 0))
+            node.get_mbox_by_msgid('test@example.com')
+            assert len(rsps.calls) == 2
 
     def test_no_cache_no_files(self, tmp_path: Path, sample_mbox: bytes) -> None:
         """When cache_dir is None, no files are written."""
-        node = LoreNode('https://lore.kernel.org/all')
-        mock_session = MagicMock()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = gzip.compress(sample_mbox)
-        mock_session.get.return_value = mock_resp
-        node.set_requests_session(mock_session)
+        with responses.RequestsMock() as rsps:
+            node = LoreNode('https://lore.kernel.org/all')
+            rsps.add(
+                responses.GET,
+                'https://lore.kernel.org/all/test%40example.com/t.mbox.gz',
+                body=gzip.compress(sample_mbox),
+                status=200,
+            )
 
-        node.get_mbox_by_msgid('test@example.com')
-        # tmp_path should be empty since we didn't set cache_dir to it
-        assert list(tmp_path.iterdir()) == []
+            node.get_mbox_by_msgid('test@example.com')
+            # tmp_path should be empty since we didn't set cache_dir to it
+            assert list(tmp_path.iterdir()) == []
 
-    def test_fetch_thread_since_not_cached(self, tmp_path: Path, sample_mbox: bytes) -> None:
+    def test_fetch_thread_since_not_cached(
+        self, tmp_path: Path, sample_mbox: bytes
+    ) -> None:
         """_fetch_thread_since should NOT be cached."""
-        node, mock_session = self._make_node(tmp_path, sample_mbox)
-        node._fetch_thread_since('test@example.com', 'dt:20240101..')
-        node._fetch_thread_since('test@example.com', 'dt:20240101..')
-        # Both calls should hit the network
-        assert mock_session.post.call_count == 2
+        with responses.RequestsMock() as rsps:
+            node = self._make_node(tmp_path, sample_mbox)
+            rsps.add(
+                responses.POST,
+                'https://lore.kernel.org/all/test%40example.com/?x=m&q=dt%3A20240101..',
+                body=gzip.compress(sample_mbox),
+                status=200,
+            )
+            node._fetch_thread_since('test@example.com', 'dt:20240101..')
+            node._fetch_thread_since('test@example.com', 'dt:20240101..')
+            # Both calls should hit the network
+            assert len(rsps.calls) == 2
 
     def test_error_not_cached(self, tmp_path: Path) -> None:
         """Network errors should not be cached."""
-        node = LoreNode('https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60)
-        mock_session = MagicMock()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 404
-        mock_session.get.return_value = mock_resp
-        node.set_requests_session(mock_session)
+        with responses.RequestsMock() as rsps:
+            node = LoreNode(
+                'https://lore.kernel.org/all', cache_dir=str(tmp_path), cache_ttl=60
+            )
+            rsps.add(
+                responses.GET,
+                'https://lore.kernel.org/all/bad%40example.com/t.mbox.gz',
+                status=404,
+            )
+            rsps.add(
+                responses.HEAD,
+                'https://lore.kernel.org/bad%40example.com/',
+                status=404,
+            )
 
-        with pytest.raises(RemoteError):
-            node.get_mbox_by_msgid('bad@example.com')
-        # No cache file should be written
-        assert list(tmp_path.glob('*.lore.cache')) == []
+            with pytest.raises(RemoteError):
+                node.get_mbox_by_msgid('bad@example.com')
+            # No cache file should be written
+            assert list(tmp_path.glob('*.lore.cache')) == []
