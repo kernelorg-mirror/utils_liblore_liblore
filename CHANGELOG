@@ -1,7 +1,7 @@
 CHANGELOG
 =========
 
-v0.8-dev (UNRELEASED)
+v0.8.0 (2026-06-11)
 ---------------------
 - Add configurable request_timeout (default connect=5s, read=30s) applied
   to all outgoing HTTP requests, including the direct HEAD calls in
