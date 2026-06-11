@@ -61,7 +61,10 @@ def make_msg() -> MsgFactory:
             msg['References'] = ' '.join(f'<{r}>' for r in references)
         if date:
             msg['Date'] = date
-        msg.set_content(body)
+        # Pass an explicit cte to match emlpolicy's cte_type and to avoid
+        # CPython's auto-CTE heuristic, which crashes under Python < 3.13
+        # when the policy sets max_line_length=None (as emlpolicy does).
+        msg.set_content(body, cte='8bit')
         return msg
 
     return create

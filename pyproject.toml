@@ -59,6 +59,11 @@ asyncio_default_fixture_loop_scope = "function"
 strict = true
 
 [tool.pyright]
+# pyright automatically ignores virtual environments and other directories, but
+# once we specify `exclude`, we're on our own. The matrix in ci-matrix.sh
+# creates .venv-<version> environments, so match them all. See
+# https://github.com/microsoft/pyright/issues/9057#issuecomment-2366938099.
+exclude = [".venv*"]
 typeCheckingMode = "strict"
 
 executionEnvironments = [
