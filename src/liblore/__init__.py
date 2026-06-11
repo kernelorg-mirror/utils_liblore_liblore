@@ -6,7 +6,7 @@ import email.charset
 import email.policy
 from email.message import EmailMessage
 
-__version__ = '0.7.1'
+__version__ = '0.8-dev'
 
 # Email policy used for parsing and serialising messages
 emlpolicy = email.policy.EmailPolicy(
@@ -32,6 +32,10 @@ class PublicInboxError(LibloreError):
     """Raised when a public-inbox operation fails."""
 
 
+class OperationCancelledError(LibloreError):
+    """Raised when an in-flight or pending request was cancelled by the caller."""
+
+
 from liblore.node import LoreNode  # noqa: E402
 
 __all__ = [
@@ -40,5 +44,6 @@ __all__ = [
     'LibloreError',
     'RemoteError',
     'PublicInboxError',
+    'OperationCancelledError',
     'LoreNode',
 ]

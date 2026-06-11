@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import time
 import urllib.parse
 from datetime import datetime, timezone
@@ -20,7 +21,7 @@ from typing import TYPE_CHECKING, Protocol, TypedDict
 
 import requests
 
-from liblore import LibloreError, RemoteError
+from liblore import LibloreError, OperationCancelledError, RemoteError
 from liblore.utils import (
     get_strict_thread,
     sort_msgs_by_received,
@@ -38,6 +39,7 @@ class _LoreNodeInitKwargs(TypedDict, total=False):
     auto_probe: bool
     probe_timeout: float
     probe_ttl: int
+    request_timeout: tuple[float, float] | float | None
     add_auth_headers: bool
     cache_dir: str | None
     cache_ttl: int
@@ -177,6 +179,7 @@ class LoreNode:
         auto_probe: bool = False,
         probe_timeout: float = 5.0,
         probe_ttl: int = 3600,
+        request_timeout: tuple[float, float] | float | None = (5.0, 30.0),
         add_auth_headers: bool = False,
         cache_dir: str | None = None,
         cache_ttl: int = 600,
@@ -184,6 +187,8 @@ class LoreNode:
         self._url = url.rstrip('/')
         self._session: requests.Session | None = None
         self._owns_session = False
+        self._request_timeout = request_timeout
+        self._cancel_event = threading.Event()
         self._user_agent_plus: str | None = None
         self._user_agent: str = f'liblore/{__import__("liblore").__version__}'
         self._cache_dir = cache_dir
@@ -266,6 +271,11 @@ class LoreNode:
             Integer (seconds).  How long cached probe results stay
             valid.  Defaults to 3600.
 
+        ``requesttimeout``
+            Float (seconds), or ``connect,read`` for separate connect
+            and read timeouts.  Applied to all outgoing HTTP requests.
+            Defaults to ``5.0,30.0``.
+
         ``useragentplus``
             String.  A unique identifier appended to the User-Agent
             header as ``app/version+IDENTIFIER``.  Used by server
@@ -345,6 +355,21 @@ class LoreNode:
                 except ValueError:
                     pass
 
+        if 'request_timeout' not in kwargs:
+            val = gitcfg.get('requesttimeout')
+            if isinstance(val, str):
+                try:
+                    if ',' in val:
+                        connect, read = val.split(',', 1)
+                        kwargs['request_timeout'] = (
+                            float(connect),
+                            float(read),
+                        )
+                    else:
+                        kwargs['request_timeout'] = float(val)
+                except ValueError:
+                    pass
+
         node = cls(url, **kwargs)
 
         val = gitcfg.get('useragentplus')
@@ -408,6 +433,31 @@ class LoreNode:
             self._session.close()
         self._session = None
         self._owns_session = False
+
+    def cancel(self) -> None:
+        """Abort the in-flight request and any pending retries.
+
+        Sets the cancel flag and closes the owned session so a thread
+        blocked in a socket read raises immediately.  Thread-safe; safe
+        to call from a thread other than the one issuing the request.
+        Subsequent requests raise :class:`~liblore.OperationCancelledError`
+        until :meth:`reset_cancel` is called.
+
+        An injected session (``set_requests_session``) is intentionally
+        *not* closed — the caller owns its lifecycle.
+        """
+        self._cancel_event.set()
+        if self._session is not None and self._owns_session:
+            try:
+                self._session.close()
+            except Exception:
+                pass
+            self._session = None
+            self._owns_session = False
+
+    def reset_cancel(self) -> None:
+        """Clear the cancel flag before starting a fresh operation."""
+        self._cancel_event.clear()
 
     def __enter__(self) -> LoreNode:
         return self
@@ -623,11 +673,17 @@ class LoreNode:
         if self._auto_probe and not self._probe_done:
             self.probe_origins()
 
+        # Always apply a timeout so a stalled socket cannot hang forever,
+        # but let an explicit per-call timeout override the default.
+        kwargs.setdefault('timeout', self._request_timeout)
+
         session = self._get_session()
         last_exc: Exception | None = None
         last_resp: requests.Response | None = None
 
         for origin in self._all_origins:
+            if self._cancel_event.is_set():
+                raise OperationCancelledError('Request cancelled')
             request_url = self._rewrite_url(url, origin)
             logger.debug('Trying %s %s', method, request_url)
             try:
@@ -636,6 +692,11 @@ class LoreNode:
                     method.lower(),
                 )(request_url, **kwargs)
             except (requests.ConnectionError, requests.Timeout) as exc:
+                # A cancel() closes the session mid-flight, which surfaces
+                # here as a ConnectionError.  Distinguish that from a real
+                # origin failure: if the caller cancelled, do NOT fail over.
+                if self._cancel_event.is_set():
+                    raise OperationCancelledError('Request cancelled') from exc
                 logger.warning(
                     'Request to %s failed (%s), trying next host',
                     origin,
@@ -799,7 +860,11 @@ class LoreNode:
         head_url = f'{self._canonical_origin}/{qmsgid}/'
         session = self._get_session()
         logger.debug('Trying HEAD %s for redirect discovery', head_url)
-        head_resp = session.head(head_url, allow_redirects=True)
+        head_resp = session.head(
+            head_url,
+            allow_redirects=True,
+            timeout=self._request_timeout,
+        )
         if head_resp.status_code == 200 and head_resp.url != head_url:
             # Redirected — use the resolved location
             resolved = head_resp.url.rstrip('/')
@@ -1072,7 +1137,7 @@ class LoreNode:
         logger.debug('Validating public-inbox URL: %s', help_url)
         try:
             session = self._get_session()
-            resp = session.head(help_url)
+            resp = session.head(help_url, timeout=self._request_timeout)
         except Exception as ex:
             raise RemoteError(
                 f'Failed to reach public-inbox at {help_url}: {ex}'

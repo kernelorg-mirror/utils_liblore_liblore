@@ -1,6 +1,18 @@
 CHANGELOG
 =========
 
+v0.8-dev (UNRELEASED)
+---------------------
+- Add configurable request_timeout (default connect=5s, read=30s) applied
+  to all outgoing HTTP requests, including the direct HEAD calls in
+  _resolve_msgid_via_head() and validate(). Configurable via the
+  `requesttimeout` git config key (single float or "connect,read").
+- Add LoreNode.cancel() / reset_cancel() for thread-safe cancellation of
+  in-flight requests. cancel() closes the owned session to interrupt a
+  blocked socket read and raises the new OperationCancelledError on the next
+  request boundary; it never fails over to another origin. Injected sessions
+  are left untouched.
+
 v0.7.1 (2026-04-08)
 --------------------
 - Add per-origin git config via [liblore "<origin>"] subsections.

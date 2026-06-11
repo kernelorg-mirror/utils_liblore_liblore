@@ -15,7 +15,7 @@ import requests
 import responses
 from typing_extensions import override
 
-from liblore import RemoteError
+from liblore import OperationCancelledError, RemoteError
 from liblore.node import LoreNode
 
 
@@ -2029,3 +2029,160 @@ class TestCanonicalOriginProperty:
         """Port number is included in the origin when present."""
         node = LoreNode('http://localhost:8080/inbox')
         assert node.canonical_origin == 'http://localhost:8080'
+
+
+# =====================================================================
+# Cancellation and request timeouts
+# =====================================================================
+
+
+class TestCancellation:
+    """Tests for cancel() / reset_cancel() and the cancel event wiring."""
+
+    def test_cancel_sets_event_reset_clears(self) -> None:
+        """cancel() sets the cancel flag; reset_cancel() clears it."""
+        node = LoreNode()
+        assert not node._cancel_event.is_set()
+        node.cancel()
+        assert node._cancel_event.is_set()
+        node.reset_cancel()
+        assert not node._cancel_event.is_set()
+
+    def test_cancel_closes_owned_session(self) -> None:
+        """cancel() closes an owned session and nulls it out."""
+        node = LoreNode()
+        session = node._get_session()  # owned
+        with patch.object(session, 'close') as mock_close:
+            node.cancel()
+            mock_close.assert_called_once()
+        assert node._session is None
+        assert node._owns_session is False
+
+    def test_cancel_leaves_injected_session(self) -> None:
+        """cancel() must not close or drop a caller-injected session."""
+        node = LoreNode()
+        mock_session = MagicMock()
+        node.set_requests_session(mock_session)
+        node.cancel()
+        mock_session.close.assert_not_called()
+        assert node._session is mock_session
+
+    def test_request_raises_when_already_cancelled(self) -> None:
+        """A request started with the flag set raises immediately."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        node.set_requests_session(mock_session)
+        node.cancel()
+        with pytest.raises(OperationCancelledError):
+            node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        # The flag was set before dispatch, so no HTTP call was attempted.
+        mock_session.get.assert_not_called()
+
+    def test_connection_error_while_cancelled_does_not_failover(self) -> None:
+        """A socket closed by cancel() converts to OperationCancelledError.
+
+        The session being closed mid-flight surfaces as a ConnectionError,
+        which would normally trigger failover to the next origin.  With the
+        cancel flag set, it must convert to OperationCancelledError instead
+        and stop — no failover, no RemoteError.
+        """
+        node = LoreNode(
+            'https://lore.kernel.org/all',
+            fallback_urls=['https://mirror.example.com'],
+        )
+        mock_session = MagicMock()
+
+        def boom(*_args: object, **_kwargs: object) -> object:
+            # Simulate cancel() closing the socket during the read.
+            node._cancel_event.set()
+            raise requests.ConnectionError('socket closed')
+
+        mock_session.get.side_effect = boom
+        node.set_requests_session(mock_session)
+
+        with pytest.raises(OperationCancelledError):
+            node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        # Only the first origin was tried — no failover to the mirror.
+        assert mock_session.get.call_count == 1
+
+    def test_default_timeout_injected(self) -> None:
+        """A request without an explicit timeout gets the default."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_session.get.return_value = MagicMock(status_code=200)
+        node.set_requests_session(mock_session)
+        node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        _, kwargs = mock_session.get.call_args
+        assert kwargs['timeout'] == (5.0, 30.0)
+
+    def test_explicit_timeout_preserved(self) -> None:
+        """An explicit per-call timeout overrides the default."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_session.get.return_value = MagicMock(status_code=200)
+        node.set_requests_session(mock_session)
+        node.request('GET', 'https://lore.kernel.org/manifest.js.gz', timeout=99)
+        _, kwargs = mock_session.get.call_args
+        assert kwargs['timeout'] == 99
+
+    def test_custom_request_timeout_from_init(self) -> None:
+        """request_timeout passed to __init__ is the injected default."""
+        node = LoreNode('https://lore.kernel.org/all', request_timeout=12.0)
+        mock_session = MagicMock()
+        mock_session.get.return_value = MagicMock(status_code=200)
+        node.set_requests_session(mock_session)
+        node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        _, kwargs = mock_session.get.call_args
+        assert kwargs['timeout'] == 12.0
+
+    def test_resolve_via_head_passes_timeout(self) -> None:
+        """_resolve_msgid_via_head() applies the request timeout."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        head_resp = MagicMock(status_code=404)
+        head_resp.url = 'https://lore.kernel.org/q/'  # no redirect
+        mock_session.head.return_value = head_resp
+        node.set_requests_session(mock_session)
+        node._resolve_msgid_via_head('q')
+        _, kwargs = mock_session.head.call_args
+        assert kwargs['timeout'] == (5.0, 30.0)
+
+    def test_validate_passes_timeout(self) -> None:
+        """validate() applies the request timeout to its HEAD call."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_session.head.return_value = MagicMock(status_code=200)
+        node.set_requests_session(mock_session)
+        node.validate()
+        _, kwargs = mock_session.head.call_args
+        assert kwargs['timeout'] == (5.0, 30.0)
+
+    def test_from_git_config_single_float(self) -> None:
+        """A single-float requesttimeout is parsed into a float."""
+        gitcfg: dict[str, str | list[str]] = {'requesttimeout': '15'}
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value=gitcfg),
+        ):
+            node = LoreNode.from_git_config()
+        assert node._request_timeout == 15.0
+
+    def test_from_git_config_connect_read_tuple(self) -> None:
+        """A "connect,read" requesttimeout is parsed into a tuple."""
+        gitcfg: dict[str, str | list[str]] = {'requesttimeout': '3,20'}
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value=gitcfg),
+        ):
+            node = LoreNode.from_git_config()
+        assert node._request_timeout == (3.0, 20.0)
+
+    def test_from_git_config_invalid_ignored(self) -> None:
+        """A non-numeric requesttimeout is silently ignored (default kept)."""
+        gitcfg: dict[str, str | list[str]] = {'requesttimeout': 'notanumber'}
+        with (
+            patch('liblore.node._get_subsection_config', return_value={}),
+            patch('liblore.node._get_config_from_git', return_value=gitcfg),
+        ):
+            node = LoreNode.from_git_config()
+        assert node._request_timeout == (5.0, 30.0)
