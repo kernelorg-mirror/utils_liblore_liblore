@@ -50,6 +50,89 @@ class TestGetCleanMsgid:
         msg = make_msg(in_reply_to='parent@example.com')
         assert get_clean_msgid(msg, 'In-Reply-To') == 'parent@example.com'
 
+    def test_in_reply_to_with_encoded_comment(self) -> None:
+        """Gnus appends an RFC 2047 encoded comment after the message-ID.
+
+        The encoded-word comment must not send us down clean_header's
+        address-parsing path, which would destroy the message-ID.
+        """
+        msg = EmailMessage()
+        msg['In-Reply-To'] = (
+            '<patch-v1-1-abc123@example.com>'
+            ' (=?utf-8?Q?=22Marc-Andr=C3=A9?= Lureau"\'s'
+            ' message of "Mon, 20 Jul 2026 11:55:30 +0400")'
+        )
+        assert get_clean_msgid(msg, 'In-Reply-To') == 'patch-v1-1-abc123@example.com'
+
+    def test_in_reply_to_with_encoded_comment_parsed(self) -> None:
+        """Same case, but via a message parsed under the modern policy."""
+        raw = (
+            b'From: x@example.com\r\n'
+            b'Message-Id: <child@example.com>\r\n'
+            b'In-Reply-To: <patch-v1-1-abc123@example.com>'
+            b' (=?utf-8?Q?=22Marc-Andr=C3=A9?= Lureau"\'s'
+            b' message of "Mon, 20 Jul 2026 11:55:30 +0400")\r\n'
+            b'\r\nbody\r\n'
+        )
+        msg = parse_message(raw)
+        assert get_clean_msgid(msg, 'In-Reply-To') == 'patch-v1-1-abc123@example.com'
+
+    # --- Non-compliant / malformed headers ---------------------------------
+    # These document how extraction copes with headers that violate
+    # RFC 5322.  The contract is deliberately simple: we return the
+    # contents of the first ``<...>`` pair, or None when there isn't one.
+
+    def test_missing_angle_brackets(self) -> None:
+        """A bare address without angle brackets yields no message-ID."""
+        msg = EmailMessage()
+        msg['Message-Id'] = 'bare@example.com'
+        assert get_clean_msgid(msg) is None
+
+    def test_empty_angle_brackets(self) -> None:
+        """An empty ``<>`` has nothing to extract."""
+        msg = EmailMessage()
+        msg['In-Reply-To'] = '<>'
+        assert get_clean_msgid(msg, 'In-Reply-To') is None
+
+    def test_no_at_sign_inside_brackets(self) -> None:
+        """We trust the angle brackets and do not require an ``@``."""
+        msg = EmailMessage()
+        msg['Message-Id'] = '<garbage-no-at>'
+        assert get_clean_msgid(msg) == 'garbage-no-at'
+
+    def test_leading_comment_before_id(self) -> None:
+        """A comment preceding the message-ID must not confuse extraction."""
+        msg = EmailMessage()
+        msg['In-Reply-To'] = '(sent earlier) <parent@example.com>'
+        assert get_clean_msgid(msg, 'In-Reply-To') == 'parent@example.com'
+
+    def test_multiple_ids_returns_first(self) -> None:
+        """Some broken clients cram several IDs into In-Reply-To."""
+        msg = EmailMessage()
+        msg['In-Reply-To'] = '<first@example.com> <second@example.com>'
+        assert get_clean_msgid(msg, 'In-Reply-To') == 'first@example.com'
+
+    def test_rfc2047_encoded_msgid(self) -> None:
+        """A nonconformant fully RFC 2047-encoded ``<foo@bar>``.
+
+        RFC 2047 forbids encoded words in msg-id headers, but if one
+        shows up the modern EmailPolicy decodes it on read, so we still
+        recover the ID -- no clean_header fallback required.
+        """
+        msg = EmailMessage()
+        msg['Message-Id'] = '=?utf-8?q?=3Cfoo=40bar=3E?='
+        assert get_clean_msgid(msg) == 'foo@bar'
+
+    def test_rfc2047_encoded_msgid_parsed(self) -> None:
+        """Same nonconformant case, parsed under the real policy."""
+        raw = (
+            b'From: x@example.com\r\n'
+            b'Message-Id: =?utf-8?q?=3Cfoo=40bar=3E?=\r\n'
+            b'\r\nbody\r\n'
+        )
+        msg = parse_message(raw)
+        assert get_clean_msgid(msg) == 'foo@bar'
+
 
 class TestParseMessage:
     def test_roundtrip(self) -> None:

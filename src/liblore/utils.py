@@ -79,10 +79,21 @@ def clean_header(hdrval: str | None) -> str:
 
 
 def get_clean_msgid(msg: EmailMessage, header: str = 'Message-Id') -> str | None:
-    """Extract a clean message ID (without angle brackets) from a header."""
+    """Extract a clean message ID (without angle brackets) from a header.
+
+    Message-IDs are always ASCII and enclosed in angle brackets, and
+    RFC 2047 forbids encoded words in msg-id headers (Message-Id,
+    In-Reply-To, References).  We therefore extract straight from the
+    raw value and deliberately avoid :func:`clean_header`, whose
+    address-parsing path would mangle a bare message-ID when the header
+    also carries an encoded-word comment (e.g. Gnus-style In-Reply-To).
+
+    This mirrors :func:`_clean_msgid_raw`, which does the same on raw
+    message bytes.
+    """
     raw = msg.get(header)
     if raw:
-        matches = re.search(r'<([^>]+)>', clean_header(raw))
+        matches = re.search(r'<([^>]+)>', str(raw))
         if matches:
             return matches.groups()[0]
     return None
