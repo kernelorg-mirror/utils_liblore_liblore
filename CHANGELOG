@@ -1,6 +1,13 @@
 CHANGELOG
 =========
 
+v0.8.1 (2026-07-22)
+-------------------
+- Fix get_clean_msgid() destroying the message-ID when a msg-id header
+  (In-Reply-To/References/Message-Id) also carries an RFC 2047 encoded-word
+  comment, as Gnus emits. The ID is now extracted straight from the raw
+  header value instead of via clean_header(), matching _clean_msgid_raw().
+
 v0.8.0 (2026-06-11)
 ---------------------
 - Add configurable request_timeout (default connect=5s, read=30s) applied
