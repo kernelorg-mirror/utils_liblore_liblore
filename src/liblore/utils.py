@@ -394,6 +394,13 @@ def get_strict_thread(
                 for hval in msg.get_all(hdr_name, []):
                     raw_refs += re.findall(r'<([^>]+)>', str(hval))
 
+            # Some tooling emits messages that reference their own Message-ID.
+            # A self-reference is never meaningful for threading, so drop it
+            # before it can be mistaken for a parent.
+            if c_msgid in raw_refs:
+                logger.debug('Ignoring self-reference in %s', c_msgid)
+                raw_refs = [ref for ref in raw_refs if ref != c_msgid]
+
             # If noparent, pretend our target message has no references
             if noparent and msgid == c_msgid:
                 logger.info('Breaking thread to remove parents of %s', msgid)
