@@ -36,14 +36,14 @@ class OperationCancelledError(LibloreError):
     """Raised when an in-flight or pending request was cancelled by the caller."""
 
 
-from liblore.node import LoreNode  # noqa: E402
+from liblore.node import LoreNode
 
 __all__ = [
+    'LibloreError',
+    'LoreNode',
+    'OperationCancelledError',
+    'PublicInboxError',
+    'RemoteError',
     '__version__',
     'emlpolicy',
-    'LibloreError',
-    'RemoteError',
-    'PublicInboxError',
-    'OperationCancelledError',
-    'LoreNode',
 ]

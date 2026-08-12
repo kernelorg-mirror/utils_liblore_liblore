@@ -82,18 +82,26 @@ class TestWrapHeader:
             ('short-unic\u00f4de', '=?utf-8?q?short-unic=C3=B4de?='),
             # Long ASCII — wrapped at word boundary
             (
-                'Lorem ipsum dolor sit amet consectetur adipiscing elit '
-                'sed do eiusmod tempor incididunt ut labore et dolore magna aliqua',
-                'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do\n'
-                ' eiusmod tempor incididunt ut labore et dolore magna aliqua',
+                (
+                    'Lorem ipsum dolor sit amet consectetur adipiscing elit '
+                    'sed do eiusmod tempor incididunt ut labore et dolore magna aliqua'
+                ),
+                (
+                    'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do\n'
+                    ' eiusmod tempor incididunt ut labore et dolore magna aliqua'
+                ),
             ),
             # Long Unicode — split across multiple encoded lines
             (
-                'Lorem \u00eepsum dolor sit amet consectetur adipiscing el\u00eet '
-                'sed do eiusmod temp\u00f4r incididunt ut labore et dol\u00f4re magna aliqua',
-                '=?utf-8?q?Lorem_=C3=AEpsum_dolor_sit_amet_consectetur_adipiscin?=\n'
-                ' =?utf-8?q?g_el=C3=AEt_sed_do_eiusmod_temp=C3=B4r_incididunt_ut_labore_et?=\n'
-                ' =?utf-8?q?_dol=C3=B4re_magna_aliqua?=',
+                (
+                    'Lorem \u00eepsum dolor sit amet consectetur adipiscing el\u00eet '
+                    'sed do eiusmod temp\u00f4r incididunt ut labore et dol\u00f4re magna aliqua'
+                ),
+                (
+                    '=?utf-8?q?Lorem_=C3=AEpsum_dolor_sit_amet_consectetur_adipiscin?=\n'
+                    ' =?utf-8?q?g_el=C3=AEt_sed_do_eiusmod_temp=C3=B4r_incididunt_ut_labore_et?=\n'
+                    ' =?utf-8?q?_dol=C3=B4re_magna_aliqua?='
+                ),
             ),
             # Exactly 75 chars — boundary condition
             (
@@ -103,14 +111,18 @@ class TestWrapHeader:
             # Unicode on escape boundary
             (
                 'Lorem ipsum dolor sit amet consectetur adipiscin el\u00eet',
-                '=?utf-8?q?Lorem_ipsum_dolor_sit_amet_consectetur_adipiscin_el?=\n'
-                ' =?utf-8?q?=C3=AEt?=',
+                (
+                    '=?utf-8?q?Lorem_ipsum_dolor_sit_amet_consectetur_adipiscin_el?=\n'
+                    ' =?utf-8?q?=C3=AEt?='
+                ),
             ),
             # Unicode 1 char too long
             (
                 'Lorem ipsum dolor sit amet consectetur adipi el\u00eet',
-                '=?utf-8?q?Lorem_ipsum_dolor_sit_amet_consectetur_adipi_el=C3=AE?=\n'
-                ' =?utf-8?q?t?=',
+                (
+                    '=?utf-8?q?Lorem_ipsum_dolor_sit_amet_consectetur_adipi_el=C3=AE?=\n'
+                    ' =?utf-8?q?t?='
+                ),
             ),
         ],
     )
@@ -133,31 +145,45 @@ class TestWrapHeader:
             # Mixed Unicode — non-ASCII name gets QP encoded
             (
                 'foo@example.com, Foo Bar <bar@example.com>, F\u00f4o Baz <baz@example.com>',
-                'foo@example.com, Foo Bar <bar@example.com>, \n'
-                ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>',
+                (
+                    'foo@example.com, Foo Bar <bar@example.com>, \n'
+                    ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>'
+                ),
             ),
             # Complex with quoted specials
             (
-                'foo@example.com, Foo Bar <bar@example.com>, '
-                'F\u00f4o Baz <baz@example.com>, "Quux, Foo" <quux@example.com>',
-                'foo@example.com, Foo Bar <bar@example.com>, \n'
-                ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>, '
-                '"Quux, Foo" <quux@example.com>',
+                (
+                    'foo@example.com, Foo Bar <bar@example.com>, '
+                    'F\u00f4o Baz <baz@example.com>, "Quux, Foo" <quux@example.com>'
+                ),
+                (
+                    'foo@example.com, Foo Bar <bar@example.com>, \n'
+                    ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>, '
+                    '"Quux, Foo" <quux@example.com>'
+                ),
             ),
             # Long local part forces line wrap
             (
-                '01234567890123456789012345678901234567890123456789012345678901@example.org, '
-                '\u00e4 <foo@example.org>',
-                '01234567890123456789012345678901234567890123456789012345678901@example.org, \n'
-                ' =?utf-8?q?=C3=A4?= <foo@example.org>',
+                (
+                    '01234567890123456789012345678901234567890123456789012345678901@example.org, '
+                    '\u00e4 <foo@example.org>'
+                ),
+                (
+                    '01234567890123456789012345678901234567890123456789012345678901@example.org, \n'
+                    ' =?utf-8?q?=C3=A4?= <foo@example.org>'
+                ),
             ),
             # cpython#100900 — Unicode name with RFC 5322 specials
             (
-                'foo@example.com, Foo Bar <bar@example.com>, '
-                'F\u00f4o Baz <baz@example.com>, "Qu\u00fbx, Foo" <quux@example.com>',
-                'foo@example.com, Foo Bar <bar@example.com>, \n'
-                ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>, \n'
-                ' =?utf-8?q?Qu=C3=BBx=2C_Foo?= <quux@example.com>',
+                (
+                    'foo@example.com, Foo Bar <bar@example.com>, '
+                    'F\u00f4o Baz <baz@example.com>, "Qu\u00fbx, Foo" <quux@example.com>'
+                ),
+                (
+                    'foo@example.com, Foo Bar <bar@example.com>, \n'
+                    ' =?utf-8?q?F=C3=B4o_Baz?= <baz@example.com>, \n'
+                    ' =?utf-8?q?Qu=C3=BBx=2C_Foo?= <quux@example.com>'
+                ),
             ),
         ],
     )
@@ -175,10 +201,14 @@ class TestWrapHeader:
             ),
             # Long message-id — unbreakable, stays on one line
             (
-                '<20240319-very-long-message-id-that-spans-multiple-lines-for-sure'
-                '-because-longer-than-75-characters-abcde123456@longdomain.example.com>',
-                '<20240319-very-long-message-id-that-spans-multiple-lines-for-sure'
-                '-because-longer-than-75-characters-abcde123456@longdomain.example.com>',
+                (
+                    '<20240319-very-long-message-id-that-spans-multiple-lines-for-sure'
+                    '-because-longer-than-75-characters-abcde123456@longdomain.example.com>'
+                ),
+                (
+                    '<20240319-very-long-message-id-that-spans-multiple-lines-for-sure'
+                    '-because-longer-than-75-characters-abcde123456@longdomain.example.com>'
+                ),
             ),
         ],
     )

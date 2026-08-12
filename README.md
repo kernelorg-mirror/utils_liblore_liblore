@@ -41,13 +41,13 @@ cleaned up automatically:
 ```python
 from liblore import LoreNode
 
-with LoreNode("https://lore.kernel.org/all") as node:
+with LoreNode('https://lore.kernel.org/all') as node:
     msgs = node.get_thread_by_msgid(
-        "20250101-example@kernel.org",
+        '20250101-example@kernel.org',
         sort=True,
     )
     for msg in msgs:
-        print(msg["Subject"])
+        print(msg['Subject'])
 ```
 
 If you omit the URL, it defaults to `https://lore.kernel.org/all`.
@@ -59,7 +59,7 @@ If you omit the URL, it defaults to `https://lore.kernel.org/all`.
 ```python
 from liblore import LoreNode
 
-node = LoreNode(url="https://lore.kernel.org/all")
+node = LoreNode(url='https://lore.kernel.org/all')
 ```
 
 #### Git Config Integration
@@ -72,7 +72,7 @@ maintainer with a local mirror just adds settings to their repo's
 
 ```python
 with LoreNode.from_git_config() as node:
-    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+    msgs = node.get_thread_by_msgid('20250101-example@kernel.org')
 ```
 
 Supported git config keys:
@@ -108,14 +108,14 @@ automatically:
 
 ```python
 with LoreNode(
-    "https://lore.kernel.org/all",
+    'https://lore.kernel.org/all',
     fallback_urls=[
-        "http://mymirror.local",
-        "https://tor.lore.kernel.org",
-        "https://sea.lore.kernel.org",
+        'http://mymirror.local',
+        'https://tor.lore.kernel.org',
+        'https://sea.lore.kernel.org',
     ],
 ) as node:
-    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+    msgs = node.get_thread_by_msgid('20250101-example@kernel.org')
 ```
 
 Each fallback is an **origin prefix** (`scheme://host`). The path from the
@@ -141,14 +141,14 @@ origin:
 
 ```python
 node = LoreNode(
-    "https://lore.kernel.org/all",
-    fallback_urls=["https://tor.lore.kernel.org", "https://sea.lore.kernel.org"],
+    'https://lore.kernel.org/all',
+    fallback_urls=['https://tor.lore.kernel.org', 'https://sea.lore.kernel.org'],
 )
 
 # Probe all origins concurrently and reorder by latency
 results = node.probe_origins()
 for origin, elapsed in results:
-    print(f"{origin}: {elapsed*1000:.0f}ms")
+    print(f'{origin}: {elapsed * 1000:.0f}ms')
 ```
 
 Unreachable origins are moved to the end rather than removed, so they can
@@ -161,13 +161,13 @@ Set `auto_probe=True` to trigger probing transparently on the first request:
 
 ```python
 with LoreNode(
-    "https://lore.kernel.org/all",
-    fallback_urls=["https://tor.lore.kernel.org"],
+    'https://lore.kernel.org/all',
+    fallback_urls=['https://tor.lore.kernel.org'],
     auto_probe=True,
-    cache_dir="/tmp/liblore-cache",
+    cache_dir='/tmp/liblore-cache',
 ) as node:
     # First request probes, reorders, then fetches via the fastest mirror
-    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+    msgs = node.get_thread_by_msgid('20250101-example@kernel.org')
 ```
 
 #### Caching
@@ -176,11 +176,11 @@ LoreNode can optionally cache raw mbox bytes on disk. Pass `cache_dir` to
 enable it:
 
 ```python
-with LoreNode(cache_dir="/tmp/liblore-cache", cache_ttl=600) as node:
+with LoreNode(cache_dir='/tmp/liblore-cache', cache_ttl=600) as node:
     # First call fetches from the network and writes a cache file
-    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+    msgs = node.get_thread_by_msgid('20250101-example@kernel.org')
     # Second call reads from cache (if within TTL)
-    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+    msgs = node.get_thread_by_msgid('20250101-example@kernel.org')
 ```
 
 - `cache_dir` -- directory for cache files (`None` to disable, the default)
@@ -217,10 +217,10 @@ Returns a `list[EmailMessage]`. Raises `LookupError` if no messages match.
 with LoreNode() as node:
     # Fetch a thread, sorted by date, only looking at recent messages
     msgs = node.get_thread_by_msgid(
-        "20250101-example@kernel.org",
+        '20250101-example@kernel.org',
         strict=True,
         sort=True,
-        since="20250101",
+        since='20250101',
     )
 ```
 
@@ -245,10 +245,11 @@ from datetime import datetime, timedelta, timezone
 with LoreNode() as node:
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     updates = node.get_thread_updates_since(
-        "20250101-example@kernel.org", cutoff,
+        '20250101-example@kernel.org',
+        cutoff,
     )
     if updates:
-        print(f"{len(updates)} new message(s)")
+        print(f'{len(updates)} new message(s)')
 ```
 
 **`node.get_thread_by_query(query, *, full_threads=False)`**
@@ -267,10 +268,10 @@ the matching messages.
 ```python
 with LoreNode() as node:
     # Find all messages from a sender in the last month
-    msgs = node.get_thread_by_query("f:alice@example.com d:last.month..")
+    msgs = node.get_thread_by_query('f:alice@example.com d:last.month..')
 
     # Search by patch-id and fetch the full threads
-    msgs = node.get_thread_by_query("patchid:abc123", full_threads=True)
+    msgs = node.get_thread_by_query('patchid:abc123', full_threads=True)
 ```
 
 #### Batch Fetching
@@ -288,12 +289,12 @@ each one with a brief pause between requests. Returns a
 ```python
 with LoreNode() as node:
     threads = node.batch_get_thread_by_msgid(
-        ["msg1@example.com", "msg2@example.com", "msg3@example.com"],
+        ['msg1@example.com', 'msg2@example.com', 'msg3@example.com'],
         sort=True,
-        since="2.weeks.ago",
+        since='2.weeks.ago',
     )
     for thread in threads:
-        print(f"Thread with {len(thread)} messages")
+        print(f'Thread with {len(thread)} messages')
 ```
 
 **`node.batch_get_thread_by_query(queries, *, full_threads=False)`**
@@ -303,10 +304,12 @@ query with a 100 ms cooldown. Returns a `list[list[EmailMessage]]`.
 
 ```python
 with LoreNode() as node:
-    results = node.batch_get_thread_by_query([
-        "s:fix f:alice@example.com",
-        "s:feature f:bob@example.com",
-    ])
+    results = node.batch_get_thread_by_query(
+        [
+            's:fix f:alice@example.com',
+            's:feature f:bob@example.com',
+        ]
+    )
 ```
 
 #### Raw Mbox Access
@@ -324,8 +327,8 @@ expand results to include full threads.
 
 ```python
 with LoreNode() as node:
-    raw = node.get_mbox_by_msgid("20250101-example@kernel.org")
-    with open("thread.mbox", "wb") as f:
+    raw = node.get_mbox_by_msgid('20250101-example@kernel.org')
+    with open('thread.mbox', 'wb') as f:
         f.write(raw)
 ```
 
@@ -342,7 +345,7 @@ entire thread.
 identifying your tool:
 
 ```python
-node.set_user_agent("my-tool", "1.0")
+node.set_user_agent('my-tool', '1.0')
 # User-Agent: my-tool/1.0
 ```
 
@@ -350,7 +353,7 @@ The optional `plus` argument appends a unique identifier that server operators
 can use to identify and prioritize known installations:
 
 ```python
-node.set_user_agent("my-tool", "1.0", plus="550e8400-e29b-41d4")
+node.set_user_agent('my-tool', '1.0', plus='550e8400-e29b-41d4')
 # User-Agent: my-tool/1.0+550e8400-e29b-41d4
 ```
 
@@ -362,7 +365,7 @@ using liblore:
 ```python
 # With lore.useragentplus = myuuid in ~/.gitconfig:
 node = LoreNode.from_git_config()
-node.set_user_agent("korgalore", "0.7")
+node.set_user_agent('korgalore', '0.7')
 # User-Agent: korgalore/0.7+myuuid
 ```
 
@@ -399,11 +402,13 @@ from liblore import LoreNode, OperationCancelledError
 
 node = LoreNode()
 
+
 def fetch() -> None:
     try:
         node.batch_get_thread_by_msgid(lots_of_msgids)
     except OperationCancelledError:
-        print("fetch aborted")
+        print('fetch aborted')
+
 
 worker = threading.Thread(target=fetch)
 worker.start()
@@ -412,7 +417,7 @@ node.cancel_active()
 worker.join()
 
 # The node is immediately usable again -- no reset needed:
-msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+msgs = node.get_thread_by_msgid('20250101-example@kernel.org')
 ```
 
 **`node.shutdown()`** -- cancel everything in flight *and* refuse every
@@ -437,9 +442,9 @@ chains on every message it retrieves. This requires the `authheaders` package
 
 ```python
 with LoreNode(add_auth_headers=True) as node:
-    msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+    msgs = node.get_thread_by_msgid('20250101-example@kernel.org')
     for msg in msgs:
-        print(msg["Authentication-Results"])
+        print(msg['Authentication-Results'])
         # liblore; dkim=pass header.d=kernel.org; ...
 ```
 
@@ -485,11 +490,11 @@ inspecting email messages.
 from liblore.utils import clean_header, get_clean_msgid
 
 # Decode RFC 2047 encoded headers
-decoded = clean_header("=?utf-8?q?Re=3A_Some_Subject?=")
+decoded = clean_header('=?utf-8?q?Re=3A_Some_Subject?=')
 
 # Extract a clean message ID (without angle brackets) from a message
-msgid = get_clean_msgid(msg)               # reads Message-Id by default
-msgid = get_clean_msgid(msg, "In-Reply-To")  # or any other header
+msgid = get_clean_msgid(msg)  # reads Message-Id by default
+msgid = get_clean_msgid(msg, 'In-Reply-To')  # or any other header
 ```
 
 #### Parsing Messages
@@ -540,18 +545,20 @@ and non-ASCII display names.
 from liblore.utils import format_addrs, wrap_header, get_msg_as_bytes
 
 # Format (name, email) pairs into an RFC 5322 address string
-formatted = format_addrs([
-    ("", "foo@example.com"),
-    ("Foo Bar", "bar@example.com"),
-])
+formatted = format_addrs(
+    [
+        ('', 'foo@example.com'),
+        ('Foo Bar', 'bar@example.com'),
+    ]
+)
 # -> 'foo@example.com, Foo Bar <bar@example.com>'
 
 # Wrap and RFC 2047-encode a header for SMTP
-hdr_bytes = wrap_header(("Subject", "Hello world"))
+hdr_bytes = wrap_header(('Subject', 'Hello world'))
 
 # Serialize a full message to bytes with proper encoding
-msg_bytes = get_msg_as_bytes(msg)            # \n line endings (dry-run)
-msg_bytes = get_msg_as_bytes(msg, nl="\r\n") # \r\n for SMTP
+msg_bytes = get_msg_as_bytes(msg)  # \n line endings (dry-run)
+msg_bytes = get_msg_as_bytes(msg, nl='\r\n')  # \r\n for SMTP
 ```
 
 #### Sorting and Threading
@@ -563,7 +570,7 @@ from liblore.utils import sort_msgs_by_received, get_strict_thread
 sorted_msgs = sort_msgs_by_received(msgs)
 
 # Filter a list of messages to only those in a specific thread
-thread = get_strict_thread(msgs, "20250101-example@kernel.org")
+thread = get_strict_thread(msgs, '20250101-example@kernel.org')
 
 # Break the thread at msgid, ignoring its parent references
 thread = get_strict_thread(msgs, msgid, noparent=True)
@@ -578,7 +585,7 @@ from liblore.utils import minimize_thread
 minimized = minimize_thread(msgs)
 
 # Customize which headers to keep
-minimized = minimize_thread(msgs, keep_headers=("From", "Subject", "Date"))
+minimized = minimize_thread(msgs, keep_headers=('From', 'Subject', 'Date'))
 
 # Aggressively reduce long quotes to just the last paragraph
 minimized = minimize_thread(msgs, reduce_quote_context=True)
@@ -631,11 +638,11 @@ are thin wrappers that parse the results.
 from liblore.utils import get_msgid_from_url
 
 # Extract a message ID from a lore URL
-msgid = get_msgid_from_url("https://lore.kernel.org/all/20250101-example@kernel.org/")
+msgid = get_msgid_from_url('https://lore.kernel.org/all/20250101-example@kernel.org/')
 # -> "20250101-example@kernel.org"
 
 # Also works with bare message IDs
-msgid = get_msgid_from_url("<20250101-example@kernel.org>")
+msgid = get_msgid_from_url('<20250101-example@kernel.org>')
 # -> "20250101-example@kernel.org"
 ```
 
@@ -648,7 +655,7 @@ handle specific cases:
 from liblore import LibloreError, RemoteError, PublicInboxError
 
 try:
-    msgs = node.get_thread_by_msgid("nonexistent@example.com")
+    msgs = node.get_thread_by_msgid('nonexistent@example.com')
 except RemoteError:
     # HTTP request failed (server error, network issue, etc.)
     ...

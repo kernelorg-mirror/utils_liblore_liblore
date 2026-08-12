@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import gzip
 import sys
+from collections.abc import Iterator
 from email.message import EmailMessage
 from types import ModuleType
-from typing import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,9 +28,11 @@ class _FakeAuthHeaders(ModuleType):
 
 class TestAuthHeadersImport:
     def test_raises_when_authheaders_missing(self) -> None:
-        with patch.dict(sys.modules, {'authheaders': None}):
-            with pytest.raises(LibloreError, match='authheaders library is required'):
-                LoreNode(add_auth_headers=True)
+        with (
+            patch.dict(sys.modules, {'authheaders': None}),
+            pytest.raises(LibloreError, match='authheaders library is required'),
+        ):
+            LoreNode(add_auth_headers=True)
 
     def test_ok_when_authheaders_installed(self) -> None:
         fake = _FakeAuthHeaders('authheaders')

@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import email.utils
 import textwrap
+from collections.abc import Iterator
 from email.message import EmailMessage
-from typing import Iterator, Protocol
+from typing import Protocol
 
 import pytest
 import responses as responses_

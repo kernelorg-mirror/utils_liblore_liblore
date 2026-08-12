@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator
     from typing import TypeVar
 
-    from typing_extensions import ParamSpec, Unpack
+    from typing_extensions import ParamSpec, Self, Unpack
 
     _P = ParamSpec('_P')
     _R = TypeVar('_R')
@@ -90,10 +90,11 @@ def _get_config_from_git(
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode != 0:
             return {}
-    except Exception:
+    except Exception:  # noqa: BLE001
         return {}
 
     config: dict[str, str | list[str]] = {}
@@ -142,10 +143,11 @@ def _get_subsection_config(
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode != 0:
             return {}
-    except Exception:
+    except Exception:  # noqa: BLE001
         return {}
 
     config: dict[str, str | list[str]] = {}
@@ -473,8 +475,8 @@ class LoreNode:
         if self._session is not None and self._owns_session:
             try:
                 self._session.close()
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.debug('Ignoring error closing owned session: %s', exc)
             self._session = None
             self._owns_session = False
 
@@ -577,7 +579,7 @@ class LoreNode:
             stacklevel=2,
         )
 
-    def __enter__(self) -> LoreNode:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -695,7 +697,7 @@ class LoreNode:
                 return origin, float('inf')
             logger.debug('Probe %s: %.3fs', origin, elapsed)
             return origin, elapsed
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.debug('Probe %s failed: %s', origin, exc)
             return origin, float('inf')
 
@@ -963,7 +965,7 @@ class LoreNode:
             # discover the canonical location.
             resp = self._resolve_msgid_via_head(qmsgid)
         if resp.status_code != 200:
-            raise RemoteError('Server returned an error: %s' % resp.status_code)
+            raise RemoteError(f'Server returned an error: {resp.status_code}')
         t_mbox = gzip.decompress(resp.content)
         resp.close()
 
@@ -1021,7 +1023,7 @@ class LoreNode:
         )
         resp = self._request('POST', query_url, data='x=m')
         if resp.status_code != 200:
-            raise RemoteError('Server returned an error: %s' % resp.status_code)
+            raise RemoteError(f'Server returned an error: {resp.status_code}')
         t_mbox = gzip.decompress(resp.content)
         resp.close()
 
@@ -1063,20 +1065,18 @@ class LoreNode:
         if since:
             msgs = self._fetch_thread_since(msgid, f'dt:{since}..')
             if not msgs:
-                raise LookupError(
-                    'No messages found for msgid=%s since=%s' % (msgid, since)
-                )
+                raise LookupError(f'No messages found for msgid={msgid} since={since}')
         else:
             # Full thread: GET /{msgid}/t.mbox.gz
             t_mbox = self.get_mbox_by_msgid(msgid)
             if not t_mbox:
-                raise LookupError('No messages found for msgid=%s' % msgid)
+                raise LookupError(f'No messages found for msgid={msgid}')
             msgs = split_and_dedupe(t_mbox)
 
         if strict:
             strict_msgs = get_strict_thread(msgs, msgid)
             if not isinstance(strict_msgs, list) or not len(strict_msgs):
-                raise LookupError('No messages found for msgid=%s' % msgid)
+                raise LookupError(f'No messages found for msgid={msgid}')
             msgs = strict_msgs
 
         if sort:
@@ -1173,7 +1173,7 @@ class LoreNode:
         """
         t_mbox = self.get_mbox_by_query(query, full_threads=full_threads)
         if not t_mbox:
-            raise LookupError('No results for query: %s' % query)
+            raise LookupError(f'No results for query: {query}')
         msgs = split_and_dedupe(t_mbox)
         self._authenticate_msgs(msgs)
         return msgs
@@ -1191,7 +1191,7 @@ class LoreNode:
         try:
             response = self._request('GET', raw_url)
             response.raise_for_status()
-            data = response.content
+            data: bytes = response.content
         except RemoteError:
             raise
         except Exception as ex:

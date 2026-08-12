@@ -49,7 +49,7 @@ def clean_header(hdrval: str | None) -> str:
 
     if hdrval.find('=?') >= 0:
         # If the header contains email addresses, decode them individually
-        if re.search(r'<\S+@\S+>', hdrval, flags=re.I | re.M):
+        if re.search(r'<\S+@\S+>', hdrval, flags=re.IGNORECASE | re.MULTILINE):
             newaddrs: list[str] = []
             for addr in email.utils.getaddresses([hdrval]):
                 if addr[0].find('=?') >= 0:
@@ -95,7 +95,8 @@ def get_clean_msgid(msg: EmailMessage, header: str = 'Message-Id') -> str | None
     if raw:
         matches = re.search(r'<([^>]+)>', str(raw))
         if matches:
-            return matches.groups()[0]
+            msgid: str = matches.group(1)
+            return msgid
     return None
 
 
@@ -458,8 +459,8 @@ def get_strict_thread(
 
 # Detect diff and diffstat content — messages containing these are
 # preserved verbatim by minimize_thread().
-DIFF_RE = re.compile(r'^diff\s', re.M)
-DIFFSTAT_RE = re.compile(r'^\s*\d+ file.*changed', re.M)
+DIFF_RE = re.compile(r'^diff\s', re.MULTILINE)
+DIFFSTAT_RE = re.compile(r'^\s*\d+ file.*changed', re.MULTILINE)
 
 # Default set of headers to keep when minimizing messages.
 MINIMIZE_KEEP_HEADERS: tuple[str, ...] = (
@@ -517,7 +518,7 @@ def minimize_thread(
         body = msg_get_payload(msg, strip_signature=False)
 
         if (
-            not re.search(r'^>', body, re.M)
+            not re.search(r'^>', body, re.MULTILINE)
             or DIFF_RE.search(body)
             or DIFFSTAT_RE.search(body)
         ):
@@ -645,7 +646,8 @@ def _get_raw_header(raw: bytes, name: str) -> str | None:
             value = line[len(prefix) :].strip()
 
     if value is not None:
-        return value.decode('ascii', errors='replace')
+        decoded: str = value.decode('ascii', errors='replace')
+        return decoded
     return None
 
 
@@ -655,7 +657,8 @@ def _clean_msgid_raw(raw: bytes, header: str = 'message-id') -> str | None:
     if val:
         match = re.search(r'<([^>]+)>', val)
         if match:
-            return match.group(1)
+            msgid: str = match.group(1)
+            return msgid
     return None
 
 
