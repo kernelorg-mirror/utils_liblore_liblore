@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
+import functools
 import gzip
 import hashlib
 import json
@@ -15,9 +17,10 @@ import subprocess
 import threading
 import time
 import urllib.parse
+import warnings
 from datetime import datetime, timezone
 from email.message import EmailMessage
-from typing import TYPE_CHECKING, Protocol, TypedDict
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
 import requests
 
@@ -31,7 +34,13 @@ from liblore.utils import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from typing_extensions import Unpack
+    from collections.abc import Callable, Generator
+    from typing import TypeVar
+
+    from typing_extensions import ParamSpec, Unpack
+
+    _P = ParamSpec('_P')
+    _R = TypeVar('_R')
 
 
 class _LoreNodeInitKwargs(TypedDict, total=False):
@@ -160,6 +169,24 @@ def _get_subsection_config(
     return config
 
 
+def _operation_scope(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Run the decorated LoreNode method as one logical operation.
+
+    Everything the method does — however many HTTP requests it takes —
+    shares a single cancellation scope, so a :meth:`LoreNode.cancel_active`
+    that lands anywhere in the middle (including between requests) stops
+    the whole thing.  See :meth:`LoreNode._operation`.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        node = cast('LoreNode', args[0])
+        with node._operation():  # pyright: ignore[reportPrivateUsage]
+            return func(*args, **kwargs)
+
+    return wrapper
+
+
 class LoreNode:
     """A connection to a single public-inbox endpoint.
 
@@ -188,7 +215,10 @@ class LoreNode:
         self._session: requests.Session | None = None
         self._owns_session = False
         self._request_timeout = request_timeout
-        self._cancel_event = threading.Event()
+        self._cancel_lock = threading.Lock()
+        self._cancel_generation = 0
+        self._shutdown_event = threading.Event()
+        self._op_local = threading.local()
         self._user_agent_plus: str | None = None
         self._user_agent: str = f'liblore/{__import__("liblore").__version__}'
         self._cache_dir = cache_dir
@@ -434,19 +464,12 @@ class LoreNode:
         self._session = None
         self._owns_session = False
 
-    def cancel(self) -> None:
-        """Abort the in-flight request and any pending retries.
-
-        Sets the cancel flag and closes the owned session so a thread
-        blocked in a socket read raises immediately.  Thread-safe; safe
-        to call from a thread other than the one issuing the request.
-        Subsequent requests raise :class:`~liblore.OperationCancelledError`
-        until :meth:`reset_cancel` is called.
+    def _abort_owned_session(self) -> None:
+        """Close and drop the owned session so blocked socket reads raise.
 
         An injected session (``set_requests_session``) is intentionally
         *not* closed — the caller owns its lifecycle.
         """
-        self._cancel_event.set()
         if self._session is not None and self._owns_session:
             try:
                 self._session.close()
@@ -455,9 +478,104 @@ class LoreNode:
             self._session = None
             self._owns_session = False
 
+    @contextlib.contextmanager
+    def _operation(self) -> Generator[None, None, None]:
+        """Delimit one logical operation for cancellation purposes.
+
+        On outermost entry, refuses to start when the node is shut down
+        and snapshots the current cancellation generation for this
+        thread.  :meth:`cancel_active` bumps the generation, so an
+        operation that was in flight when it landed sees the mismatch
+        at its next request and stays cancelled for the rest of its
+        run, while operations started afterwards proceed normally.
+        Re-entrant per thread: nested scopes join the outermost
+        operation.
+        """
+        depth = getattr(self._op_local, 'depth', 0)
+        if depth == 0:
+            if self._shutdown_event.is_set():
+                raise OperationCancelledError('Node is shut down')
+            self._op_local.generation = self._cancel_generation
+        self._op_local.depth = depth + 1
+        try:
+            yield
+        finally:
+            self._op_local.depth = depth
+            if depth == 0:
+                self._op_local.generation = None
+
+    def _cancelled(self) -> bool:
+        """Whether the current thread's operation has been cancelled."""
+        if self._shutdown_event.is_set():
+            return True
+        generation: int | None = getattr(self._op_local, 'generation', None)
+        if generation is None:
+            return False
+        return generation != self._cancel_generation
+
+    def cancel_active(self) -> None:
+        """Cancel all operations currently in flight.
+
+        Closes the owned session so a thread blocked in a socket read
+        raises immediately, and marks every operation currently in
+        progress as cancelled: each raises
+        :class:`~liblore.OperationCancelledError` at its next request
+        and stays cancelled for the rest of its run.  Operations
+        started after this call are unaffected — there is no sticky
+        flag to reset.  Thread-safe; safe to call from a thread other
+        than the ones issuing requests.
+        """
+        with self._cancel_lock:
+            self._cancel_generation += 1
+        self._abort_owned_session()
+
+    def shutdown(self) -> None:
+        """Cancel active operations and refuse all new ones.
+
+        The terminal state for application exit: everything in flight
+        is cancelled as in :meth:`cancel_active`, and any operation
+        started afterwards raises
+        :class:`~liblore.OperationCancelledError` immediately, so
+        racing workers fail fast instead of opening new connections.
+        Cannot be undone.  Thread-safe.
+        """
+        self._shutdown_event.set()
+        self._abort_owned_session()
+
+    @property
+    def is_shutdown(self) -> bool:
+        """Whether :meth:`shutdown` has been called."""
+        return self._shutdown_event.is_set()
+
+    def cancel(self) -> None:
+        """Deprecated alias for :meth:`cancel_active`.
+
+        .. deprecated:: 0.9
+           Cancellation is operation-scoped and no longer sticky; use
+           :meth:`cancel_active`, or :meth:`shutdown` on application
+           exit.
+        """
+        warnings.warn(
+            'cancel() is deprecated; use cancel_active() or shutdown()',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.cancel_active()
+
     def reset_cancel(self) -> None:
-        """Clear the cancel flag before starting a fresh operation."""
-        self._cancel_event.clear()
+        """Deprecated no-op.
+
+        .. deprecated:: 0.9
+           Cancellation is operation-scoped: :meth:`cancel_active`
+           only affects operations already in flight, so there is no
+           sticky flag to reset before starting a new one.
+        """
+        warnings.warn(
+            'reset_cancel() is deprecated and does nothing; '
+            'cancellation is operation-scoped and needs no reset',
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     def __enter__(self) -> LoreNode:
         return self
@@ -581,6 +699,7 @@ class LoreNode:
             logger.debug('Probe %s failed: %s', origin, exc)
             return origin, float('inf')
 
+    @_operation_scope
     def probe_origins(self, nocache: bool = False) -> list[tuple[str, float]]:
         """Probe all origins concurrently and reorder by response time.
 
@@ -652,6 +771,7 @@ class LoreNode:
         """
         return self._request(method, url, raise_on_error=True, **kwargs)
 
+    @_operation_scope
     def _request(
         self,
         method: str,
@@ -682,7 +802,7 @@ class LoreNode:
         last_resp: requests.Response | None = None
 
         for origin in self._all_origins:
-            if self._cancel_event.is_set():
+            if self._cancelled():
                 raise OperationCancelledError('Request cancelled')
             request_url = self._rewrite_url(url, origin)
             logger.debug('Trying %s %s', method, request_url)
@@ -692,10 +812,11 @@ class LoreNode:
                     method.lower(),
                 )(request_url, **kwargs)
             except (requests.ConnectionError, requests.Timeout) as exc:
-                # A cancel() closes the session mid-flight, which surfaces
-                # here as a ConnectionError.  Distinguish that from a real
-                # origin failure: if the caller cancelled, do NOT fail over.
-                if self._cancel_event.is_set():
+                # cancel_active() and shutdown() close the session
+                # mid-flight, which surfaces here as a ConnectionError.
+                # Distinguish that from a real origin failure: if the
+                # caller cancelled, do NOT fail over.
+                if self._cancelled():
                     raise OperationCancelledError('Request cancelled') from exc
                 logger.warning(
                     'Request to %s failed (%s), trying next host',
@@ -817,6 +938,7 @@ class LoreNode:
     # Primary API — raw mbox
     # -----------------------------------------------------------------
 
+    @_operation_scope
     def get_mbox_by_msgid(self, msgid: str, *, nocache: bool = False) -> bytes:
         """Fetch a thread mbox by message ID and return the raw bytes.
 
@@ -873,6 +995,7 @@ class LoreNode:
             return self._request('GET', mbox_url)
         return head_resp
 
+    @_operation_scope
     def get_mbox_by_query(
         self,
         query: str,
@@ -909,6 +1032,7 @@ class LoreNode:
     # Primary API — parsed messages
     # -----------------------------------------------------------------
 
+    @_operation_scope
     def get_thread_by_msgid(
         self,
         msgid: str,
@@ -990,6 +1114,7 @@ class LoreNode:
             return []
         return split_and_dedupe(t_mbox)
 
+    @_operation_scope
     def get_thread_updates_since(
         self,
         msgid: str,
@@ -1034,6 +1159,7 @@ class LoreNode:
         self._authenticate_msgs(msgs)
         return msgs
 
+    @_operation_scope
     def get_thread_by_query(
         self,
         query: str,
@@ -1052,6 +1178,7 @@ class LoreNode:
         self._authenticate_msgs(msgs)
         return msgs
 
+    @_operation_scope
     def get_message_by_msgid(self, msgid: str, *, nocache: bool = False) -> bytes:
         """Fetch a single raw email message by message ID."""
         key = self._cache_key('message_by_msgid', msgid)
@@ -1077,6 +1204,7 @@ class LoreNode:
     # Batch API
     # -----------------------------------------------------------------
 
+    @_operation_scope
     def batch_get_thread_by_msgid(
         self,
         msgids: list[str],
@@ -1101,6 +1229,7 @@ class LoreNode:
             )
         return results
 
+    @_operation_scope
     def batch_get_thread_by_query(
         self,
         queries: list[str],
@@ -1124,6 +1253,7 @@ class LoreNode:
             results.append(self.get_thread_by_query(query, full_threads=full_threads))
         return results
 
+    @_operation_scope
     def validate(self) -> None:
         """Validate the URL as a public-inbox endpoint.
 

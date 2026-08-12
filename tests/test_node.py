@@ -2037,54 +2037,58 @@ class TestCanonicalOriginProperty:
 
 
 class TestCancellation:
-    """Tests for cancel() / reset_cancel() and the cancel event wiring."""
+    """Tests for operation-scoped cancellation: cancel_active()/shutdown()."""
 
-    def test_cancel_sets_event_reset_clears(self) -> None:
-        """cancel() sets the cancel flag; reset_cancel() clears it."""
-        node = LoreNode()
-        assert not node._cancel_event.is_set()
-        node.cancel()
-        assert node._cancel_event.is_set()
-        node.reset_cancel()
-        assert not node._cancel_event.is_set()
-
-    def test_cancel_closes_owned_session(self) -> None:
-        """cancel() closes an owned session and nulls it out."""
+    def test_cancel_active_closes_owned_session(self) -> None:
+        """cancel_active() closes an owned session and nulls it out."""
         node = LoreNode()
         session = node._get_session()  # owned
         with patch.object(session, 'close') as mock_close:
-            node.cancel()
+            node.cancel_active()
             mock_close.assert_called_once()
         assert node._session is None
         assert node._owns_session is False
 
-    def test_cancel_leaves_injected_session(self) -> None:
-        """cancel() must not close or drop a caller-injected session."""
+    def test_shutdown_closes_owned_session(self) -> None:
+        """shutdown() closes an owned session and nulls it out."""
+        node = LoreNode()
+        session = node._get_session()  # owned
+        with patch.object(session, 'close') as mock_close:
+            node.shutdown()
+            mock_close.assert_called_once()
+        assert node._session is None
+        assert node._owns_session is False
+
+    def test_cancel_active_leaves_injected_session(self) -> None:
+        """cancel_active() must not close or drop an injected session."""
         node = LoreNode()
         mock_session = MagicMock()
         node.set_requests_session(mock_session)
-        node.cancel()
+        node.cancel_active()
         mock_session.close.assert_not_called()
         assert node._session is mock_session
 
-    def test_request_raises_when_already_cancelled(self) -> None:
-        """A request started with the flag set raises immediately."""
+    def test_new_operation_after_cancel_active_proceeds(self) -> None:
+        """cancel_active() does not poison operations started later.
+
+        This is the structural fix for the stale-cancel-flag bug class:
+        there is no sticky flag, so a fresh operation needs no reset.
+        """
         node = LoreNode('https://lore.kernel.org/all')
         mock_session = MagicMock()
+        mock_session.get.return_value = MagicMock(status_code=200)
         node.set_requests_session(mock_session)
-        node.cancel()
-        with pytest.raises(OperationCancelledError):
-            node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
-        # The flag was set before dispatch, so no HTTP call was attempted.
-        mock_session.get.assert_not_called()
+        node.cancel_active()
+        resp = node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        assert resp.status_code == 200
 
-    def test_connection_error_while_cancelled_does_not_failover(self) -> None:
-        """A socket closed by cancel() converts to OperationCancelledError.
+    def test_cancel_active_mid_flight_does_not_failover(self) -> None:
+        """A socket closed by cancel_active() cancels, without failover.
 
         The session being closed mid-flight surfaces as a ConnectionError,
-        which would normally trigger failover to the next origin.  With the
-        cancel flag set, it must convert to OperationCancelledError instead
-        and stop — no failover, no RemoteError.
+        which would normally trigger failover to the next origin.  When the
+        operation was cancelled, it must convert to OperationCancelledError
+        instead and stop — no failover, no RemoteError.
         """
         node = LoreNode(
             'https://lore.kernel.org/all',
@@ -2093,8 +2097,8 @@ class TestCancellation:
         mock_session = MagicMock()
 
         def boom(*_args: object, **_kwargs: object) -> object:
-            # Simulate cancel() closing the socket during the read.
-            node._cancel_event.set()
+            # Simulate cancel_active() closing the socket during the read.
+            node.cancel_active()
             raise requests.ConnectionError('socket closed')
 
         mock_session.get.side_effect = boom
@@ -2104,6 +2108,117 @@ class TestCancellation:
             node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
         # Only the first origin was tried — no failover to the mirror.
         assert mock_session.get.call_count == 1
+
+    def test_cancelled_operation_stays_cancelled(self) -> None:
+        """Within one operation a cancel is sticky; outside it is not."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_session.get.return_value = MagicMock(status_code=200)
+        node.set_requests_session(mock_session)
+
+        with node._operation():
+            node.cancel_active()
+            # Every request for the rest of this operation raises...
+            for _ in range(2):
+                with pytest.raises(OperationCancelledError):
+                    node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        # ...and none of them was dispatched over the wire.
+        mock_session.get.assert_not_called()
+
+        # A fresh operation proceeds normally.
+        resp = node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        assert resp.status_code == 200
+
+    def test_shutdown_refuses_new_operations(self) -> None:
+        """After shutdown(), starting an operation raises immediately."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        node.set_requests_session(mock_session)
+        assert node.is_shutdown is False
+        node.shutdown()
+        assert node.is_shutdown is True
+        with pytest.raises(OperationCancelledError):
+            node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        # Refused at operation entry — no HTTP call was attempted.
+        mock_session.get.assert_not_called()
+
+    def test_shutdown_mid_flight_does_not_failover(self) -> None:
+        """A socket closed by shutdown() cancels, without failover."""
+        node = LoreNode(
+            'https://lore.kernel.org/all',
+            fallback_urls=['https://mirror.example.com'],
+        )
+        mock_session = MagicMock()
+
+        def boom(*_args: object, **_kwargs: object) -> object:
+            node.shutdown()
+            raise requests.ConnectionError('socket closed')
+
+        mock_session.get.side_effect = boom
+        node.set_requests_session(mock_session)
+
+        with pytest.raises(OperationCancelledError):
+            node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        assert mock_session.get.call_count == 1
+
+    def test_batch_cancel_between_requests_stops_batch(
+        self, sample_mbox: bytes
+    ) -> None:
+        """A cancel landing between batch items stops the whole batch.
+
+        The batch methods are one operation, so a cancel_active() that
+        arrives while no request is in flight (e.g. during the
+        inter-item cooldown) must still stop the remaining items.
+        """
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+
+        def first_ok_then_cancelled(*_args: object, **_kwargs: object) -> object:
+            # The cancel lands while item one is still being processed,
+            # i.e. between the batch's HTTP requests.
+            node.cancel_active()
+            return MagicMock(status_code=200, content=gzip.compress(sample_mbox))
+
+        mock_session.get.side_effect = first_ok_then_cancelled
+        node.set_requests_session(mock_session)
+
+        with pytest.raises(OperationCancelledError):
+            node.batch_get_thread_by_msgid(['first@example.com', 'first@example.com'])
+        # Item one completed; item two was never fetched.
+        assert mock_session.get.call_count == 1
+
+    def test_nested_operations_join_the_outermost(self) -> None:
+        """Nested _operation() scopes share the outer generation."""
+        node = LoreNode()
+        with node._operation():
+            outer_generation = node._op_local.generation
+            with node._operation():
+                assert node._op_local.depth == 2
+                assert node._op_local.generation == outer_generation
+            assert node._op_local.depth == 1
+        assert node._op_local.depth == 0
+        assert node._op_local.generation is None
+
+    def test_cancel_is_deprecated_alias_for_cancel_active(self) -> None:
+        """cancel() warns and behaves exactly like cancel_active()."""
+        node = LoreNode('https://lore.kernel.org/all')
+        mock_session = MagicMock()
+        mock_session.get.return_value = MagicMock(status_code=200)
+        node.set_requests_session(mock_session)
+        with pytest.warns(DeprecationWarning, match='cancel_active'):
+            node.cancel()
+        assert node._cancel_generation == 1
+        # Not sticky: a fresh operation proceeds without any reset.
+        resp = node.request('GET', 'https://lore.kernel.org/manifest.js.gz')
+        assert resp.status_code == 200
+
+    def test_reset_cancel_is_a_deprecated_noop(self) -> None:
+        """reset_cancel() warns and changes no cancellation state."""
+        node = LoreNode()
+        with pytest.warns(DeprecationWarning, match='operation-scoped'):
+            node.reset_cancel()
+        assert node._cancel_generation == 0
+        assert node.is_shutdown is False
 
     def test_default_timeout_injected(self) -> None:
         """A request without an explicit timeout gets the default."""
