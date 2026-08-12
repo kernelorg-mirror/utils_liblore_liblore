@@ -1,6 +1,15 @@
 CHANGELOG
 =========
 
+v0.8.2 (2026-08-12)
+-------------------
+- Fix get_strict_thread() dropping an entire series when a message's
+  In-Reply-To/References headers point at its own Message-ID. Such
+  self-references are now filtered out for every message, instead of being
+  treated as a parent, which previously caused a self-referencing cover
+  letter with noparent set to seed the ignore set with its own msgid and
+  silently discard all of its children.
+
 v0.8.1 (2026-07-22)
 -------------------
 - Fix get_clean_msgid() destroying the message-ID when a msg-id header
