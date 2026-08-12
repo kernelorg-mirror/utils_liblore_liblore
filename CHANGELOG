@@ -1,6 +1,19 @@
 CHANGELOG
 =========
 
+v0.9.0 (2026-08-12)
+-------------------
+- Make cancellation operation-scoped. Every public entry point now runs
+  as one logical operation, and cancel_active() cancels only operations
+  already in flight: each stays cancelled for the rest of its run (a
+  batch aborts fully, even when the cancel lands between requests),
+  while operations started afterwards proceed normally -- there is no
+  sticky flag to reset. shutdown() is the new terminal state for
+  application exit: it cancels everything in flight and refuses all new
+  operations; is_shutdown reports it. cancel() remains as a deprecated
+  alias for cancel_active(), and reset_cancel() is now a deprecated
+  no-op. See MIGRATIONS.md for the 0.8 -> 0.9 migration guide.
+
 v0.8.2 (2026-08-12)
 -------------------
 - Fix get_strict_thread() dropping an entire series when a message's
