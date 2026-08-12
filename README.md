@@ -377,6 +377,58 @@ public-inbox server. Raises `RemoteError` if it does not.
 **`node.close()`** -- close the HTTP session. Called automatically when
 using `LoreNode` as a context manager.
 
+#### Cancellation
+
+Fetches can take a while, and interactive applications need a way to bail
+out -- the user pressed Escape, or the whole application is exiting. Both
+methods are thread-safe and are meant to be called from a different thread
+than the one doing the fetching. Cancellation is *operation-scoped*: each
+public method call is one operation, and cancelling affects only the
+operations that are running at that moment.
+
+**`node.cancel_active()`** -- cancel every operation currently in flight.
+Each one raises `OperationCancelledError` (from a worker thread, this
+surfaces in whatever way your framework reports worker exceptions) and stays
+cancelled for the rest of its run, so a batch stops fully even when the
+cancel arrives between its requests. Operations started afterwards are
+unaffected -- there is no flag to reset before the next fetch.
+
+```python
+import threading
+from liblore import LoreNode, OperationCancelledError
+
+node = LoreNode()
+
+def fetch() -> None:
+    try:
+        node.batch_get_thread_by_msgid(lots_of_msgids)
+    except OperationCancelledError:
+        print("fetch aborted")
+
+worker = threading.Thread(target=fetch)
+worker.start()
+# ... user presses Escape:
+node.cancel_active()
+worker.join()
+
+# The node is immediately usable again -- no reset needed:
+msgs = node.get_thread_by_msgid("20250101-example@kernel.org")
+```
+
+**`node.shutdown()`** -- cancel everything in flight *and* refuse every
+operation started afterwards. This is the terminal state for application
+exit: a worker racing against shutdown raises `OperationCancelledError`
+immediately instead of opening a new connection and delaying the exit.
+There is no way to undo a shutdown. The **`node.is_shutdown`** property
+reports whether the node has been shut down.
+
+Cancelling closes the node-owned HTTP session, so a thread blocked in a
+socket read is interrupted right away rather than waiting for a timeout. A
+session you injected with `set_requests_session()` is left untouched.
+
+Versions before 0.9 used a sticky `cancel()`/`reset_cancel()` pair; both
+still work but are deprecated. See `MIGRATIONS.md` for how to move over.
+
 #### Message Authentication
 
 LoreNode can optionally verify DKIM signatures, DMARC alignment, and ARC
